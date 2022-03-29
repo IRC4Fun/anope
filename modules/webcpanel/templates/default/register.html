@@ -9,6 +9,12 @@
 		<link href="//netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css" rel="stylesheet">
 		<link href="/static/style.css" media="screen" rel="stylesheet" type="text/css" />
 		<!--[if lt IE 9]><script src="https://cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv.js"></script><![endif]-->
+		<style>
+		    .hideme{
+		        display:none;
+		        visibility: hidden;
+		    }
+		</style>
 
 		<title>{TITLE}</title>
 	</head>
@@ -43,6 +49,10 @@
 						<input type="email" name="email" class="form-control" placeholder="Email"
 							style="margin-bottom: 15px;">
 					{END IF}
+
+					<div class="hideme">
+			        Please, leave this field blank: <input type="text" name="bad" />  #the comment is for text-browser users
+			    </div>
 
 						<button class="btn btn-lg btn-warning btn-block" type="submit">Register</button>
 					</form>

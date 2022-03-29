@@ -10,9 +10,17 @@
 bool WebCPanel::Confirm::OnRequest(HTTPProvider *server, const Anope::string &page_name, HTTPClient *client, HTTPMessage &message, HTTPReply &reply)
 {
 	TemplateFileServer::Replacements replacements;
-	const Anope::string &user = message.post_data["username"], &pass = message.post_data["password"], &email = message.post_data["email"];
+	const Anope::string &user = message.post_data["username"], &pass = message.post_data["password"], &email = message.post_data["email"], &bad = message.post_data["bad"];
 
 	replacements["TITLE"] = page_title;
+
+	if (!bad.empty())
+	{
+		replacements["INVALID_LOGIN"] = "Spambot Detected";
+		TemplateFileServer page("register.html");
+		page.Serve(server, page_name, client, message, reply, replacements);
+		return true;
+	}
 
 	if (!user.empty() && !pass.empty())
 	{
