@@ -46,7 +46,7 @@ class CommandNSDrop : public Command
   * un-authorized (or unintentional) checkmark verification. -siniStar
   */
 
-    if (na->nc->HasExt("NS_NO_EXPIRE"))
+    if (na->HasExt("NS_NO_EXPIRE"))
     {
 			source.Reply(_("Sorry, your nickname cannot be dropped -- please ask staff for more information."));
 			return;
