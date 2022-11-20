@@ -39,6 +39,19 @@ class CommandNSDrop : public Command
 
 		bool is_mine = source.GetAccount() == na->nc;
 
+ /*
+  * Prevent Users with NOEXPIRE from manually dropping their accounts
+  * This prevents STAFF accounts from being dropped, and prevents Checkmark
+  * accounts from being dropped and then re-registered and gaining
+  * un-authorized (or unintentional) checkmark verification. -siniStar
+  */
+
+    if (na->nc->HasExt("NS_NO_EXPIRE"))
+    {
+			source.Reply(_("Sorry, your nickname cannot be dropped -- please ask staff for more information."));
+			return;
+		}
+
 		if (!is_mine && !source.HasPriv("nickserv/drop"))
 			source.Reply(ACCESS_DENIED);
 		else if (Config->GetModule("nickserv")->Get<bool>("secureadmins", "yes") && !is_mine && na->nc->IsServicesOper())
