@@ -25,4 +25,4 @@ class ModuleRPLChanURL : public Module
 	}
 };
 
-MODULE_INIT(ModuleRPLChanURL )
+MODULE_INIT(ModuleRPLChanURL)
