@@ -1166,7 +1166,7 @@ class OSNotify : public Module
 		const User *u = source ? source : User::Find(user, false);
 
 		if (u && NotifyList.HasFlag(u, 't'))
-			NLog("channel", "%s changed topic on %s to %s", BuildNUHR(u).c_str(), c->name.c_str(), topic.c_str());
+			NLog("channel", "TOPIC -- %s set to %s by %s", c->name.c_str(), topic.c_str(), BuildNUHR(u).c_str());
 	}
 
 	void OnPostCommand(CommandSource &source, Command *command, const std::vector<Anope::string> &params) anope_override
@@ -1197,4 +1197,3 @@ class OSNotify : public Module
 };
 
 MODULE_INIT(OSNotify)
-
