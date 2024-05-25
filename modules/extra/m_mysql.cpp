@@ -339,9 +339,14 @@ Result MySQLService::RunQuery(const Query &query)
 {
 	this->Lock.Lock();
 
-	Anope::string real_query = this->BuildQuery(query);
+	if (!this->CheckConnection())
+	{
+		this->Lock.Unlock();
+		return MySQLResult(query, query.query, mysql_error(this->sql));
+	}
 
-	if (this->CheckConnection() && !mysql_real_query(this->sql, real_query.c_str(), real_query.length()))
+	Anope::string real_query = this->BuildQuery(query);
+	if (!mysql_real_query(this->sql, real_query.c_str(), real_query.length()))
 	{
 		MYSQL_RES *res = mysql_store_result(this->sql);
 		unsigned int id = mysql_insert_id(this->sql);
@@ -395,11 +400,11 @@ std::vector<Query> MySQLService::CreateTable(const Anope::string &table, const D
 
 			query_text += ", `" + it->first + "` ";
 			if (data.GetType(it->first) == Serialize::Data::DT_INT)
-				query_text += "int(11)";
+				query_text += "int";
 			else
 				query_text += "text";
 		}
-		query_text += ", PRIMARY KEY (`id`), KEY `timestamp_idx` (`timestamp`))";
+		query_text += ", PRIMARY KEY (`id`), KEY `timestamp_idx` (`timestamp`)) ROW_FORMAT=DYNAMIC";
 		queries.push_back(query_text);
 	}
 	else
@@ -412,7 +417,7 @@ std::vector<Query> MySQLService::CreateTable(const Anope::string &table, const D
 
 			Anope::string query_text = "ALTER TABLE `" + table + "` ADD `" + it->first + "` ";
 			if (data.GetType(it->first) == Serialize::Data::DT_INT)
-				query_text += "int(11)";
+				query_text += "int";
 			else
 				query_text += "text";
 
