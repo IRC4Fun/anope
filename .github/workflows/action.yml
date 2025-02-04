@@ -27,8 +27,10 @@ jobs:
       - name: Notify IRC
         uses: openzfsonwindows/notify-irc@v1
         with:
-          channel: "#Development,#IRC4Fun"
+
+          channel: "#Development"
           server: "irc.irc4fun.net"
           nickname: "GitHub"
+          sasl_password: ${{ secrets.SASLPASS }}
           ansicolor: "false"
           eventpath: ${{ github.event_path }}
