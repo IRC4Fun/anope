@@ -262,7 +262,7 @@ class CommandNSRegister : public Command
 					source.Reply(_("All new accounts must be validated by an administrator. Please wait for your registration to be confirmed."));
 				else if (nsregister.equals_ci("mail"))
 					source.Reply(_("Your email address is not confirmed. To confirm it, follow the instructions that were emailed to you.\n"
-							"If you do not receive the email within \00215 minutes\002, use: \002/msg NickServ RESEND\002"));
+							"If you do not receive the email within\002 15 minutes\002, use: \002/msg NickServ RESEND\002"));
 			}
 		}
 	}
