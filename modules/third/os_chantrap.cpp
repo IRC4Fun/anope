@@ -410,15 +410,17 @@ void ApplyToChan(const ChanTrapInfo *ct, Channel *c)
 	}
 }
 
-void CreateChan(const ChanTrapInfo *ct, bool created)
+bool CreateChan(const ChanTrapInfo *ct)
 {
-	ChannelStatus status(Config->GetModule("BotServ")->Get<Anope::string>("botmodes", "ao"));
-
 	if (ct->bots == 0)
-		return;
+		return false;
 
-	/* Create or take over the channel (remove modes then set ours) */
+	ChannelStatus status(Config->GetModule("BotServ")->Get<Anope::string>("botmodes", "ao"));
+	bool created = false;
+
+	/* Create or takeover the channel, remove users and change modes as needed. */
 	Channel *c = Channel::FindOrCreate(ct->mask, created);
+	OperServ->Join(c, &status);
 	if (!created)
 	{
 		for (Channel::ModeList::const_iterator it = c->GetModes().begin(); it != c->GetModes().end(); )
@@ -430,9 +432,6 @@ void CreateChan(const ChanTrapInfo *ct, bool created)
 		}
 	}
 	c->SetModes(OperServ, false, ct->modes.c_str());
-
-	/* Join OperServ to hold the channel while we zap any existing users (if needed) */
-	OperServ->Join(c, &status);
 	if (!created)
 		ApplyToChan(ct, c);
 
@@ -441,7 +440,7 @@ void CreateChan(const ChanTrapInfo *ct, bool created)
 	for (botinfo_map::const_iterator it = BotListByNick->begin(), it_end = BotListByNick->end(); it != it_end; ++it)
 	{
 		if (joined == ct->bots)
-			return;
+			return created;
 
 		BotInfo *bi = it->second;
 		if (!bi || bi->nick.equals_ci("OperServ"))
@@ -458,7 +457,7 @@ void CreateChan(const ChanTrapInfo *ct, bool created)
 		for (std::map<const CreatedBotInfo *, unsigned>::const_iterator it = bots.begin(), it_end = bots.end(); it != it_end; ++it)
 		{
 			if (joined == ct->bots)
-				return;
+				return created;
 
 			const CreatedBotInfo *cbi = it->first;
 			if (cbi)
@@ -483,6 +482,8 @@ void CreateChan(const ChanTrapInfo *ct, bool created)
 		}
 		while (joined < ct->bots);
 	}
+
+	return created;
 }
 
 const unsigned FindMatches(const ChanTrapInfo *ct)
@@ -523,11 +524,20 @@ class CommandOSChanTrap : public Command
 		}
 
 		mask = params[1];
-		bots = convertTo<unsigned>(params[2]);
 		saction = params[3];
 		sduration = params[4];
 		modes = params[5];
 		reason = params[6];
+
+		try
+		{
+			bots = convertTo<unsigned>(params[2]);
+		}
+		catch (const ConvertException &)
+		{
+			source.Reply("Invalid number of bots: '%s' is not valid for number of bots.", params[2].c_str());
+			return;
+		}
 
 		if (bots == 0 && mask.replace_all_cs("?*", "").empty())
 
@@ -714,7 +724,7 @@ class CommandOSChanTrap : public Command
 			if (c)
 				matched = true;
 
-			CreateChan(ct, NULL);
+			CreateChan(ct);
 
 			ChannelInfo *ci = ChannelInfo::Find(ct->mask);
 			if (ci)
@@ -1027,10 +1037,7 @@ class OSChanTrap : public Module
 				matched_chans += FindMatches(ct);
 			else
 			{
-				bool cr = false;
-				CreateChan(ct, cr);
-
-				if (cr)
+				if (CreateChan(ct))
 					created_chans++;
 				else
 					matched_chans++;
@@ -1051,7 +1058,7 @@ class OSChanTrap : public Module
 			throw ModuleException("Requires version 2.0.x of Anope.");
 
 		this->SetAuthor("genius3000");
-		this->SetVersion("1.0.0");
+		this->SetVersion("1.0.2");
 
 		if (Me && Me->IsSynced())
 			this->Init();
@@ -1060,8 +1067,8 @@ class OSChanTrap : public Module
 	void OnReload(Configuration::Conf *conf) anope_override
 	{
 		OperServ = conf->GetClient("OperServ");
-		kill_reason = conf->GetModule(this)->Get<Anope::string>("kill_reason", "I know what you did last join!");
-		akill_reason = conf->GetModule(this)->Get<Anope::string>("akill_reason", "Joined a spambot trap channel - contact Help@IRC4Fun.net if in error.");
+		kill_reason = conf->GetModule(this)->Get<Anope::string>("killreason", "I know what you did last join!");
+		akill_reason = conf->GetModule(this)->Get<Anope::string>("akillreason", "You found yourself a disappearing act!");
 	}
 
 	void OnUplinkSync(Server *) anope_override
