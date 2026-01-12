@@ -4,13 +4,15 @@
  * IRC: irc.irc4fun.net Port:+6697 (tls)
  * Channel: #development
  *
- * GroupServ header definitions for Anope 2.1
+ * GroupServ module created by reverse for Anope 2.1
  *
- * Inspired by Atheme's GroupServ, but implemented for Anope.
+ * Public types and core interface for GroupServ.
  *
- * This provides groups (named like !group) which contain member accounts with
- * per-group access flags. It intentionally does not attempt to replace Anope's
- * NickServ GROUP (nick grouping) feature.
+ * This provides account groups (named like !group) which contain member
+ * accounts with per-group access flags.
+ *
+ * Note: This intentionally does not attempt to replace Anope's NickServ GROUP
+ * (nick grouping) feature.
  */
 
 #pragma once
@@ -54,14 +56,18 @@ inline bool HasFlag(GSGroupFlags value, GSGroupFlags flag)
 enum class GSAccessFlags : unsigned int
 {
 	NONE = 0,
-	FOUNDER = 1 << 0,
-	INVITE = 1 << 1,
-	SET = 1 << 2,
-	FLAGS = 1 << 3,
-	ACLVIEW = 1 << 4,
-	BAN = 1 << 5,
+	FOUNDER = 1 << 0,   // Atheme: +F
+	FLAGS = 1 << 1,     // Atheme: +f (modify ACL)
+	ACLVIEW = 1 << 2,   // Atheme: +A
+	MEMO = 1 << 3,      // Atheme: +m (group memos; stored only)
+	CHANACCESS = 1 << 4,// Atheme: +c (stored only)
+	VHOST = 1 << 5,     // Atheme: +v (stored only)
+	SET = 1 << 6,       // Atheme: +s
+	INVITE = 1 << 7,    // Atheme: +i
+	BAN = 1 << 8,       // Atheme: +b
 
-	ALL = (FOUNDER | INVITE | SET | FLAGS | ACLVIEW),
+	ALL = (FOUNDER | FLAGS | ACLVIEW | MEMO | CHANACCESS | VHOST | SET | INVITE),
+	ALL_NOFOUNDER = (FLAGS | ACLVIEW | MEMO | CHANACCESS | VHOST | SET | INVITE),
 };
 
 inline GSAccessFlags operator|(GSAccessFlags a, GSAccessFlags b)
@@ -95,9 +101,18 @@ struct GSGroupRecord final
 	Anope::string url;
 	Anope::string email;
 	Anope::string channel;
+	Anope::string vhost;
 
-	Anope::string joinflags_raw;
 	GSAccessFlags joinflags = GSAccessFlags::NONE;
+
+	struct Memo final
+	{
+		Anope::string sender;
+		time_t time = 0;
+		Anope::string text;
+	};
+
+	std::vector<Memo> memos;
 
 	// account (lowercased) -> flags
 	std::map<Anope::string, GSAccessFlags> access;
@@ -108,6 +123,29 @@ struct GSInvite final
 	Anope::string group;
 	time_t created = 0;
 	time_t expires = 0;
+};
+
+struct GSDropChallenge final
+{
+	Anope::string token;
+	time_t created = 0;
+};
+
+struct GSChanAccessData final
+	: Serializable
+{
+	Anope::string object;
+	Anope::string group;
+	bool group_only = false;
+
+	GSChanAccessData(Extensible*) : Serializable("GSChanAccessData") { }
+	GSChanAccessData(ChannelInfo* ci, const Anope::string& g, bool only)
+		: Serializable("GSChanAccessData")
+	{
+		object = ci->name;
+		group = g;
+		group_only = only;
+	}
 };
 
 class GroupServCore final
@@ -121,6 +159,11 @@ public:
 	void Reply(CommandSource& source, const Anope::string& msg);
 	void ReplyF(CommandSource& source, const char* fmt, ...) ATTR_FORMAT(3, 4);
 
+	bool DoesGroupExist(const Anope::string& groupname) const;
+	bool IsMemberOfGroup(const Anope::string& groupname, const NickCore* nc) const;
+	bool HasGroupAccess(const Anope::string& groupname, const NickCore* nc, GSAccessFlags required) const;
+	void SetChanAccessItem(ExtensibleItem<GSChanAccessData>* item);
+
 	bool IsAdmin(CommandSource& source) const;
 	bool IsAuspex(CommandSource& source) const;
 	bool CanExceedLimits(CommandSource& source) const;
@@ -129,6 +172,7 @@ public:
 	bool DropGroup(CommandSource& source, const Anope::string& groupname, const Anope::string& key, bool force);
 	bool ShowInfo(CommandSource& source, const Anope::string& groupname);
 	bool ListGroups(CommandSource& source, const Anope::string& pattern);
+	bool ListChans(CommandSource& source, const Anope::string& groupname);
 
 	bool JoinGroup(CommandSource& source, const Anope::string& groupname);
 	bool InviteToGroup(CommandSource& source, const Anope::string& groupname, const Anope::string& account);
@@ -136,9 +180,18 @@ public:
 	bool ShowFlags(CommandSource& source, const Anope::string& groupname);
 	bool SetFlags(CommandSource& source, const Anope::string& groupname, const Anope::string& account, const Anope::string& changes, bool force);
 
-	bool SetOption(CommandSource& source, const Anope::string& groupname, const Anope::string& setting, const Anope::string& value);
+	bool SendMemo(CommandSource& source, const Anope::string& groupname, const Anope::string& text);
+	bool ListMemos(CommandSource& source, const Anope::string& groupname);
+	bool ReadMemo(CommandSource& source, const Anope::string& groupname, unsigned index);
+	bool DelMemo(CommandSource& source, const Anope::string& groupname, unsigned index);
 
-	void SaveDB() const;
+	bool SetOption(CommandSource& source, const Anope::string& groupname, const Anope::string& setting, const Anope::string& value);
+	bool SetGroupFlag(CommandSource& source, const Anope::string& groupname, GSGroupFlags flag, bool enabled);
+
+	bool GetGroupVHost(const Anope::string& groupname, Anope::string& out) const;
+	void GetGroupsForAccount(const NickCore* nc, std::vector<Anope::string>& out, bool show_hidden) const;
+
+	void SaveDB();
 	void LoadDB();
 	time_t GetSaveInterval() const { return this->save_interval; }
 
@@ -146,6 +199,7 @@ private:
 	Module* module;
 	Serialize::Reference<BotInfo> groupserv;
 	bool reply_with_notice = true;
+	ExtensibleItem<GSChanAccessData>* chanaccess_item = nullptr;
 
 	void SendToUser(User* u, const Anope::string& msg);
 
@@ -155,15 +209,15 @@ private:
 
 	unsigned int maxgroups = 5;
 	unsigned int maxgroupacs = 0;
+	unsigned int maxgroupmemos = 50; // 0 = unlimited
 	bool enable_open_groups = true;
-	GSAccessFlags default_joinflags = GSAccessFlags::ACLVIEW;
-	Anope::string default_joinflags_raw = "+V";
+	GSAccessFlags default_joinflags = GSAccessFlags::NONE;
 	
 	time_t save_interval = 600;
 
 	std::map<Anope::string, GSGroupRecord> groups; // key = lowercased name
 	std::map<Anope::string, GSInvite> invites; // key = lowercased account
-	std::map<Anope::string, Anope::string> drop_challenges; // key = lowercased account+"|"+group => token
+	std::map<Anope::string, GSDropChallenge> drop_challenges; // key = lowercased account+"|"+group
 	bool initialized = false;
 
 	Anope::string GetDBPath() const;
@@ -173,6 +227,8 @@ private:
 	static bool IsValidGroupName(const Anope::string& name);
 	static Anope::string NormalizeKey(const Anope::string& s);
 	static Anope::string DropChallengeKey(const Anope::string& account, const Anope::string& group);
+	void PurgeExpiredState();
+	void ClampMemos(GSGroupRecord& g);
 
 	GSGroupRecord* FindGroup(const Anope::string& name);
 	GSGroupRecord& GetOrCreateGroup(const Anope::string& name);

@@ -15,6 +15,8 @@
 
 #include "groupserv.h"
 
+#include "language.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdarg>
@@ -30,6 +32,7 @@ namespace
 	constexpr const char* LEGACY_DB_MAGIC = "groupserv";
 	constexpr uint64_t DB_VERSION = 1;
 	constexpr time_t INVITE_TTL = 7 * 24 * 60 * 60; // 7 days
+	constexpr time_t DROP_CHALLENGE_TTL = 30 * 60; // 30 minutes
 
 	bool ParseU64(const Anope::string& in, uint64_t& out)
 	{
@@ -44,6 +47,55 @@ namespace
 			return false;
 		}
 	}
+
+	bool ParseHostMask(const Anope::string& rawhostmask, Anope::string& user, Anope::string& host)
+	{
+		Anope::string raw = rawhostmask;
+		raw.trim();
+		if (raw.empty())
+			return false;
+		if (raw.find(' ') != Anope::string::npos)
+			return false;
+
+		size_t a = raw.find('@');
+		if (a == Anope::string::npos)
+			host = raw;
+		else
+		{
+			user = raw.substr(0, a);
+			host = raw.substr(a + 1);
+		}
+		return !host.empty();
+	}
+
+	bool ValidateHostMask(CommandSource& source, const Anope::string& user, const Anope::string& host)
+	{
+		if (!user.empty())
+		{
+			if (!IRCD->CanSetVIdent)
+			{
+				source.Reply(HOST_NO_VIDENT);
+				return false;
+			}
+			if (!IRCD->IsIdentValid(user))
+			{
+				source.Reply(HOST_SET_VIDENT_ERROR);
+				return false;
+			}
+		}
+
+		if (host.length() > IRCD->MaxHost)
+		{
+			source.Reply(HOST_SET_VHOST_TOO_LONG, IRCD->MaxHost);
+			return false;
+		}
+		if (!IRCD->IsHostValid(host))
+		{
+			source.Reply(HOST_SET_VHOST_ERROR);
+			return false;
+		}
+		return true;
+	}
 }
 
 GroupServCore::GroupServCore(Module* owner)
@@ -57,6 +109,71 @@ GroupServCore::~GroupServCore()
 {
 	if (this->initialized)
 		this->SaveDB();
+}
+
+void GroupServCore::PurgeExpiredState()
+{
+	// Expired invites should not remain in memory forever.
+	for (auto it = this->invites.begin(); it != this->invites.end();)
+	{
+		if (it->second.expires && it->second.expires < Anope::CurTime)
+			it = this->invites.erase(it);
+		else
+			++it;
+	}
+
+	// Drop challenges are transient; keep the map bounded.
+	for (auto it = this->drop_challenges.begin(); it != this->drop_challenges.end();)
+	{
+		if (it->second.created && (it->second.created + DROP_CHALLENGE_TTL) < Anope::CurTime)
+			it = this->drop_challenges.erase(it);
+		else
+			++it;
+	}
+}
+
+bool GroupServCore::DoesGroupExist(const Anope::string& groupname) const
+{
+	const auto key = NormalizeKey(groupname);
+	return this->groups.find(key) != this->groups.end();
+}
+
+bool GroupServCore::IsMemberOfGroup(const Anope::string& groupname, const NickCore* nc) const
+{
+	if (!nc)
+		return false;
+
+	const auto key = NormalizeKey(groupname);
+	auto it = this->groups.find(key);
+	if (it == this->groups.end())
+		return false;
+
+	const auto flags = this->GetAccessFor(it->second, nc);
+	if (flags == GSAccessFlags::NONE)
+		return false;
+
+	if (HasFlag(flags, GSAccessFlags::BAN))
+		return false;
+
+	return true;
+}
+
+bool GroupServCore::HasGroupAccess(const Anope::string& groupname, const NickCore* nc, GSAccessFlags required) const
+{
+	if (!nc)
+		return false;
+
+	const auto key = NormalizeKey(groupname);
+	auto it = this->groups.find(key);
+	if (it == this->groups.end())
+		return false;
+
+	return this->HasAccess(it->second, nc, required);
+}
+
+void GroupServCore::SetChanAccessItem(ExtensibleItem<GSChanAccessData>* item)
+{
+	this->chanaccess_item = item;
 }
 
 Anope::string GroupServCore::GetDBPath() const
@@ -148,6 +265,9 @@ bool GroupServCore::IsValidGroupName(const Anope::string& name)
 
 NickCore* GroupServCore::FindAccount(const Anope::string& account) const
 {
+	NickAlias* na = NickAlias::Find(account);
+	if (na && na->nc)
+		return na->nc;
 	return NickCore::Find(account);
 }
 
@@ -207,7 +327,9 @@ GSAccessFlags GroupServCore::GetAccessFor(const GSGroupRecord& g, const NickCore
 bool GroupServCore::HasAccess(const GSGroupRecord& g, const NickCore* nc, GSAccessFlags required) const
 {
 	const auto flags = this->GetAccessFor(g, nc);
-	if (HasFlag(flags, GSAccessFlags::BAN))
+	// A group ban should block access, but a founder should never be locked out
+	// by an accidental +b (older versions implied +b when +F was set).
+	if (HasFlag(flags, GSAccessFlags::BAN) && !HasFlag(flags, GSAccessFlags::FOUNDER))
 		return false;
 	return (static_cast<unsigned int>(flags) & static_cast<unsigned int>(required)) == static_cast<unsigned int>(required);
 }
@@ -215,19 +337,21 @@ bool GroupServCore::HasAccess(const GSGroupRecord& g, const NickCore* nc, GSAcce
 Anope::string GroupServCore::FlagsToString(GSAccessFlags flags) const
 {
 	Anope::string out;
-	auto add = [&](const char* s)
+	auto add = [&](char c)
 	{
-		if (!out.empty())
-			out += " ";
-		out += s;
+		out += c;
 	};
 
-	if (HasFlag(flags, GSAccessFlags::FOUNDER)) add("F");
-	if (HasFlag(flags, GSAccessFlags::INVITE)) add("I");
-	if (HasFlag(flags, GSAccessFlags::SET)) add("S");
-	if (HasFlag(flags, GSAccessFlags::FLAGS)) add("M");
-	if (HasFlag(flags, GSAccessFlags::ACLVIEW)) add("V");
-	if (HasFlag(flags, GSAccessFlags::BAN)) add("B");
+	// Atheme-style letters (see ParseFlags).
+	if (HasFlag(flags, GSAccessFlags::FOUNDER)) add('F');
+	if (HasFlag(flags, GSAccessFlags::FLAGS)) add('f');
+	if (HasFlag(flags, GSAccessFlags::ACLVIEW)) add('A');
+	if (HasFlag(flags, GSAccessFlags::MEMO)) add('m');
+	if (HasFlag(flags, GSAccessFlags::CHANACCESS)) add('c');
+	if (HasFlag(flags, GSAccessFlags::VHOST)) add('v');
+	if (HasFlag(flags, GSAccessFlags::SET)) add('s');
+	if (HasFlag(flags, GSAccessFlags::INVITE)) add('i');
+	if (HasFlag(flags, GSAccessFlags::BAN)) add('b');
 	if (out.empty())
 		out = "-";
 	return out;
@@ -257,18 +381,48 @@ GSAccessFlags GroupServCore::ParseFlags(const Anope::string& flagstring, bool al
 	GSAccessFlags flags = current;
 	std::vector<Anope::string> tokens;
 	sepstream(flagstring, ' ').GetTokens(tokens);
+	if (tokens.empty() && !flagstring.empty())
+		tokens.push_back(flagstring);
 
-	auto apply_one = [&](const Anope::string& up, char dir) {
+	auto apply_one = [&](const Anope::string& token, char dir) {
 		GSAccessFlags bit = GSAccessFlags::NONE;
-		if (up == "A" || up == "ALL") bit = GSAccessFlags::ALL;
-		else if (up == "F" || up == "FOUNDER") bit = GSAccessFlags::FOUNDER;
-		else if (up == "I" || up == "INVITE") bit = GSAccessFlags::INVITE;
-		else if (up == "S" || up == "SET") bit = GSAccessFlags::SET;
-		else if (up == "M" || up == "FLAGS" || up == "MANAGE") bit = GSAccessFlags::FLAGS;
-		else if (up == "V" || up == "ACLVIEW" || up == "VIEW") bit = GSAccessFlags::ACLVIEW;
-		else if (up == "B" || up == "BAN") bit = GSAccessFlags::BAN;
+
+		// Single-letter flags are case-sensitive (Atheme style):
+		// +F founder, +f manage ACL, +A view ACL, +m memo, +c chanaccess, +v vhost, +s set, +b ban, +i invite
+		if (token.length() == 1)
+		{
+			const char ch = token[0];
+			switch (ch)
+			{
+				case '*': bit = GSAccessFlags::ALL; break;
+				case 'F': bit = GSAccessFlags::FOUNDER; break;
+				case 'f': bit = GSAccessFlags::FLAGS; break;
+				case 'A': bit = GSAccessFlags::ACLVIEW; break;
+				case 'm': bit = GSAccessFlags::MEMO; break;
+				case 'c': bit = GSAccessFlags::CHANACCESS; break;
+				case 'v': bit = GSAccessFlags::VHOST; break;
+				case 's': bit = GSAccessFlags::SET; break;
+				case 'i': bit = GSAccessFlags::INVITE; break;
+				case 'b': bit = GSAccessFlags::BAN; break;
+				default: return false;
+			}
+		}
 		else
-			return false;
+		{
+			const Anope::string u = token.upper();
+			// Long names are case-insensitive.
+			if (u == "ALL") bit = GSAccessFlags::ALL;
+			else if (u == "FOUNDER") bit = GSAccessFlags::FOUNDER;
+			else if (u == "FLAGS" || u == "MANAGE") bit = GSAccessFlags::FLAGS;
+			else if (u == "ACLVIEW" || u == "VIEW") bit = GSAccessFlags::ACLVIEW;
+			else if (u == "MEMO") bit = GSAccessFlags::MEMO;
+			else if (u == "CHAN" || u == "CHANACCESS") bit = GSAccessFlags::CHANACCESS;
+			else if (u == "VHOST") bit = GSAccessFlags::VHOST;
+			else if (u == "SET") bit = GSAccessFlags::SET;
+			else if (u == "INVITE") bit = GSAccessFlags::INVITE;
+			else if (u == "BAN") bit = GSAccessFlags::BAN;
+			else return false;
+		}
 
 		if (dir == '-')
 			flags = static_cast<GSAccessFlags>(static_cast<unsigned int>(flags) & ~static_cast<unsigned int>(bit));
@@ -292,15 +446,26 @@ GSAccessFlags GroupServCore::ParseFlags(const Anope::string& flagstring, bool al
 		if (dir == '-' && !allow_minus)
 			continue;
 
-		Anope::string up = token.upper();
-		if (apply_one(up, dir))
+		// Special:
+		// - "+" means "add all permissions except founder" (Atheme behavior)
+		// - "-" means "remove all permissions including founder"
+		if (token.empty())
+		{
+			if (dir == '-')
+				flags = GSAccessFlags::NONE;
+			else
+				flags |= GSAccessFlags::ALL_NOFOUNDER;
+			continue;
+		}
+
+		if (apply_one(token, dir))
 			continue;
 
 		// Support compact Atheme-style strings like +VI or -MS.
-		if (up.length() > 1)
+		if (token.length() > 1)
 		{
 			bool any = false;
-			for (const auto ch : up)
+			for (const auto ch : token)
 			{
 				if (!isalpha(static_cast<unsigned char>(ch)))
 					continue;
@@ -315,9 +480,90 @@ GSAccessFlags GroupServCore::ParseFlags(const Anope::string& flagstring, bool al
 
 	// Founder implies management powers.
 	if (HasFlag(flags, GSAccessFlags::FOUNDER))
-		flags |= (GSAccessFlags::FLAGS | GSAccessFlags::SET | GSAccessFlags::INVITE | GSAccessFlags::ACLVIEW);
+		flags |= GSAccessFlags::ALL_NOFOUNDER;
 
 	return flags;
+}
+
+bool GroupServCore::ListChans(CommandSource& source, const Anope::string& groupname)
+{
+	GSGroupRecord* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "The group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	if (!source.GetAccount())
+	{
+		this->Reply(source, "You must be identified to use LISTCHANS.");
+		return false;
+	}
+	if (!this->HasAccess(*g, source.GetAccount(), GSAccessFlags::ACLVIEW) && !this->IsAuspex(source))
+	{
+		this->Reply(source, "Access denied.");
+		return false;
+	}
+
+	// Atheme semantics are "channels the group has access to".
+	// In this module we implement that as explicit channel association via:
+	//   /msg ChanServ SET #channel GROUP <!group>
+	if (!this->chanaccess_item)
+	{
+		this->Reply(source, "LISTCHANS is not available (channel association storage not initialized).");
+		return false;
+	}
+
+	std::vector<Anope::string> chans;
+	for (const auto& [_, ci] : *RegisteredChannelList)
+	{
+		if (!ci)
+			continue;
+
+		auto* d = this->chanaccess_item->Get(ci);
+		if (!d)
+			continue;
+		if (NormalizeKey(d->group) != NormalizeKey(g->name))
+			continue;
+		chans.push_back(ci->name);
+	}
+	std::sort(chans.begin(), chans.end());
+
+	this->ReplyF(source, "Channels associated with %s:", g->name.c_str());
+	if (chans.empty())
+	{
+		this->Reply(source, "(none)");
+		return true;
+	}
+
+	for (const auto& ch : chans)
+		this->ReplyF(source, "- %s", ch.c_str());
+	this->ReplyF(source, "End of list - %u channel(s) shown.", static_cast<unsigned int>(chans.size()));
+	return true;
+}
+
+bool GroupServCore::SetGroupFlag(CommandSource& source, const Anope::string& groupname, GSGroupFlags flag, bool enabled)
+{
+	if (!this->IsAdmin(source))
+	{
+		this->Reply(source, "Access denied.");
+		return false;
+	}
+
+	GSGroupRecord* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "The group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	if (enabled)
+		g->flags |= flag;
+	else
+		g->flags = static_cast<GSGroupFlags>(static_cast<unsigned int>(g->flags) & ~static_cast<unsigned int>(flag));
+
+	this->SaveDB();
+	return true;
 }
 
 void GroupServCore::SetReplyMode(const Anope::string& mode)
@@ -402,6 +648,7 @@ void GroupServCore::LoadDB()
 {
 	std::map<Anope::string, GSGroupRecord> new_groups;
 	std::map<Anope::string, GSInvite> new_invites;
+	std::map<Anope::string, Anope::string> joinflags_tmp; // groupkey -> raw joinflags string
 
 	const auto path = this->GetDBPath();
 	std::ifstream in(path.c_str());
@@ -453,8 +700,8 @@ void GroupServCore::LoadDB()
 				g.url = UnescapeValue(parts[5]);
 				g.email = UnescapeValue(parts[6]);
 				g.channel = UnescapeValue(parts[7]);
-				g.joinflags_raw = UnescapeValue(parts[8]);
-				g.joinflags = this->ParseFlags(g.joinflags_raw, false, GSAccessFlags::NONE);
+				const auto joinflags_raw = UnescapeValue(parts[8]);
+				g.joinflags = this->ParseFlags(joinflags_raw, false, GSAccessFlags::NONE);
 				new_groups.emplace(NormalizeKey(g.name), g);
 			}
 			else if (type.equals_ci("A"))
@@ -508,6 +755,7 @@ void GroupServCore::LoadDB()
 					load_legacy();
 					this->groups.swap(new_groups);
 					this->invites.swap(new_invites);
+					this->PurgeExpiredState();
 					return;
 				}
 			}
@@ -520,6 +768,8 @@ void GroupServCore::LoadDB()
 	// HelpServ-style key=value flatfile.
 	uint64_t version = 0;
 	std::map<Anope::string, std::map<uint64_t, std::pair<Anope::string, uint64_t>>> access_tmp; // groupkey -> idx -> (acct, flags)
+	struct MemoTmp { Anope::string sender; uint64_t time = 0; Anope::string text; };
+	std::map<Anope::string, std::map<uint64_t, MemoTmp>> memos_tmp; // groupkey -> idx -> memo
 	struct InviteTmp { Anope::string account; Anope::string group; uint64_t created = 0; uint64_t expires = 0; };
 	std::map<uint64_t, InviteTmp> invites_tmp;
 
@@ -578,8 +828,10 @@ void GroupServCore::LoadDB()
 				g.email = val;
 			else if (field.equals_ci("channel"))
 				g.channel = val;
+			else if (field.equals_ci("vhost"))
+				g.vhost = val;
 			else if (field.equals_ci("joinflags"))
-				g.joinflags_raw = val;
+				joinflags_tmp[gkey] = val;
 			else if (field.equals_ci("access") && parts.size() >= 5)
 			{
 				uint64_t idx = 0;
@@ -591,6 +843,20 @@ void GroupServCore::LoadDB()
 					entry.first = NormalizeKey(val);
 				else if (afield.equals_ci("flags"))
 					ParseU64(val, entry.second);
+			}
+			else if (field.equals_ci("memo") && parts.size() >= 5)
+			{
+				uint64_t idx = 0;
+				if (!ParseU64(parts[3], idx) || idx > 1000000)
+					continue;
+				const auto mfield = parts[4];
+				auto& memo = memos_tmp[gkey][idx];
+				if (mfield.equals_ci("sender"))
+					memo.sender = val;
+				else if (mfield.equals_ci("time"))
+					ParseU64(val, memo.time);
+				else if (mfield.equals_ci("text"))
+					memo.text = val;
 			}
 		}
 		else if (parts[0].equals_ci("invite") && parts.size() >= 3)
@@ -619,7 +885,8 @@ void GroupServCore::LoadDB()
 	{
 		if (g.name.empty())
 			g.name = gkey;
-		g.joinflags = this->ParseFlags(g.joinflags_raw, false, GSAccessFlags::NONE);
+		const auto it = joinflags_tmp.find(gkey);
+		g.joinflags = this->ParseFlags(it != joinflags_tmp.end() ? it->second : Anope::string(), false, GSAccessFlags::NONE);
 		g.access.clear();
 
 		auto ait = access_tmp.find(gkey);
@@ -630,6 +897,23 @@ void GroupServCore::LoadDB()
 			if (entry.first.empty())
 				continue;
 			g.access[NormalizeKey(entry.first)] = static_cast<GSAccessFlags>(static_cast<unsigned int>(entry.second));
+		}
+
+		g.memos.clear();
+		auto mit = memos_tmp.find(gkey);
+		if (mit != memos_tmp.end())
+		{
+			for (const auto& [_, memo] : mit->second)
+			{
+				if (memo.text.empty())
+					continue;
+				GSGroupRecord::Memo out;
+				out.sender = memo.sender;
+				out.time = static_cast<time_t>(memo.time);
+				out.text = memo.text;
+				g.memos.push_back(std::move(out));
+			}
+			this->ClampMemos(g);
 		}
 	}
 
@@ -646,14 +930,17 @@ void GroupServCore::LoadDB()
 
 	this->groups.swap(new_groups);
 	this->invites.swap(new_invites);
+	this->PurgeExpiredState();
 }
 
-void GroupServCore::SaveDB() const
+void GroupServCore::SaveDB()
 {
 	if (!this->initialized)
 		return;
 	if (Anope::ReadOnly)
 		return;
+
+	this->PurgeExpiredState();
 
 	const auto path = this->GetDBPath();
 	const auto tmp = path + ".tmp";
@@ -685,7 +972,8 @@ void GroupServCore::SaveDB() const
 		out << "group." << gkey << ".url=" << EscapeValue(g.url) << "\n";
 		out << "group." << gkey << ".email=" << EscapeValue(g.email) << "\n";
 		out << "group." << gkey << ".channel=" << EscapeValue(g.channel) << "\n";
-		out << "group." << gkey << ".joinflags=" << EscapeValue(g.joinflags_raw) << "\n";
+		out << "group." << gkey << ".vhost=" << EscapeValue(g.vhost) << "\n";
+		out << "group." << gkey << ".joinflags=" << EscapeValue(this->FlagsToString(g.joinflags)) << "\n";
 
 		std::vector<std::pair<Anope::string, GSAccessFlags>> a;
 		a.reserve(g.access.size());
@@ -697,6 +985,14 @@ void GroupServCore::SaveDB() const
 			out << "group." << gkey << ".access." << static_cast<uint64_t>(i) << ".account=" << EscapeValue(a[i].first) << "\n";
 			out << "group." << gkey << ".access." << static_cast<uint64_t>(i) << ".flags=" << static_cast<uint64_t>(static_cast<unsigned int>(a[i].second)) << "\n";
 		}
+
+		for (size_t i = 0; i < g.memos.size(); ++i)
+		{
+			const auto& m = g.memos[i];
+			out << "group." << gkey << ".memo." << static_cast<uint64_t>(i) << ".sender=" << EscapeValue(m.sender) << "\n";
+			out << "group." << gkey << ".memo." << static_cast<uint64_t>(i) << ".time=" << static_cast<uint64_t>(m.time) << "\n";
+			out << "group." << gkey << ".memo." << static_cast<uint64_t>(i) << ".text=" << EscapeValue(m.text) << "\n";
+		}
 	}
 
 	// Invites.
@@ -707,8 +1003,6 @@ void GroupServCore::SaveDB() const
 	std::sort(invs.begin(), invs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 	for (const auto& [acct, inv] : invs)
 	{
-		if (inv.expires && inv.expires < Anope::CurTime)
-			continue;
 		out << "invite." << invite_idx << ".account=" << EscapeValue(acct) << "\n";
 		out << "invite." << invite_idx << ".group=" << EscapeValue(inv.group) << "\n";
 		out << "invite." << invite_idx << ".created=" << static_cast<uint64_t>(inv.created) << "\n";
@@ -758,12 +1052,11 @@ void GroupServCore::OnReload(Configuration::Conf& conf)
 
 	this->maxgroups = mod->Get<unsigned int>("maxgroups", "5");
 	this->maxgroupacs = mod->Get<unsigned int>("maxgroupacs", "0");
+	this->maxgroupmemos = mod->Get<unsigned int>("maxgroupmemos", "50");
 	this->enable_open_groups = mod->Get<bool>("enable_open_groups", "yes");
 
-	this->default_joinflags_raw = mod->Get<Anope::string>("default_joinflags", "+V");
-	this->default_joinflags = this->ParseFlags(this->default_joinflags_raw, false, GSAccessFlags::NONE);
-	if (this->default_joinflags == GSAccessFlags::NONE)
-		this->default_joinflags = GSAccessFlags::ACLVIEW;
+	this->default_joinflags = this->ParseFlags(mod->Get<Anope::string>("default_joinflags", ""), false, GSAccessFlags::NONE);
+	// Atheme default: JOIN grants no privileges unless joinflags are configured.
 
 	this->save_interval = mod->Get<time_t>("save_interval", "600");
 
@@ -808,7 +1101,6 @@ bool GroupServCore::RegisterGroup(CommandSource& source, const Anope::string& gr
 	g.name = groupname;
 	g.regtime = Anope::CurTime;
 	g.flags = GSGroupFlags::NONE;
-	g.joinflags_raw.clear();
 	g.joinflags = GSAccessFlags::NONE;
 	g.access.clear();
 
@@ -854,14 +1146,19 @@ bool GroupServCore::DropGroup(CommandSource& source, const Anope::string& groupn
 		if (key.empty())
 		{
 			const auto token = Anope::Random(12);
-			this->drop_challenges[chal_key] = token;
+			this->drop_challenges[chal_key] = { token, Anope::CurTime };
 			this->ReplyF(source, "This will DESTROY the group %s.", g->name.c_str());
 			this->ReplyF(source, "To confirm: /msg %s DROP %s %s", this->groupserv ? this->groupserv->nick.c_str() : "GroupServ", g->name.c_str(), token.c_str());
 			return false;
 		}
 
 		auto it = this->drop_challenges.find(chal_key);
-		if (it == this->drop_challenges.end() || it->second != key)
+		if (it != this->drop_challenges.end() && it->second.created && (it->second.created + DROP_CHALLENGE_TTL) < Anope::CurTime)
+		{
+			this->drop_challenges.erase(it);
+			it = this->drop_challenges.end();
+		}
+		if (it == this->drop_challenges.end() || it->second.token != key)
 		{
 			this->Reply(source, "Invalid key for DROP.");
 			return false;
@@ -895,7 +1192,8 @@ bool GroupServCore::ShowInfo(CommandSource& source, const Anope::string& groupna
 
 	NickCore* nc = source.GetAccount();
 	const auto access = this->GetAccessFor(*g, nc);
-	const bool allowed = this->IsAuspex(source) || HasFlag(g->flags, GSGroupFlags::PUBLIC) || (nc && access != GSAccessFlags::NONE && !HasFlag(access, GSAccessFlags::BAN));
+	const bool allowed = this->IsAuspex(source) || HasFlag(g->flags, GSGroupFlags::PUBLIC)
+		|| (nc && access != GSAccessFlags::NONE && (!HasFlag(access, GSAccessFlags::BAN) || HasFlag(access, GSAccessFlags::FOUNDER)));
 	if (!allowed)
 	{
 		this->Reply(source, "Access denied.");
@@ -928,48 +1226,82 @@ bool GroupServCore::ShowInfo(CommandSource& source, const Anope::string& groupna
 		this->ReplyF(source, "URL: %s", g->url.c_str());
 	if (!g->email.empty())
 		this->ReplyF(source, "Email: %s", g->email.c_str());
+	if (!g->vhost.empty())
+		this->ReplyF(source, "VHost: %s", g->vhost.c_str());
 
-	if (!g->joinflags_raw.empty())
-		this->ReplyF(source, "Join flags: %s", g->joinflags_raw.c_str());
+	if (g->joinflags != GSAccessFlags::NONE)
+		this->ReplyF(source, "Join flags: +%s", this->FlagsToString(g->joinflags).c_str());
 
 	this->ReplyF(source, "Access entries: %u", static_cast<unsigned int>(g->access.size()));
 	this->Reply(source, "*** End of Info ***");
 	return true;
 }
 
+bool GroupServCore::GetGroupVHost(const Anope::string& groupname, Anope::string& out) const
+{
+	out.clear();
+	auto it = this->groups.find(NormalizeKey(groupname));
+	if (it == this->groups.end())
+		return false;
+	out = it->second.vhost;
+	return true;
+}
+
+void GroupServCore::GetGroupsForAccount(const NickCore* nc, std::vector<Anope::string>& out, bool show_hidden) const
+{
+	out.clear();
+	if (!nc)
+		return;
+
+	out.reserve(this->groups.size());
+	for (const auto& [_, g] : this->groups)
+	{
+		const auto flags = this->GetAccessFor(g, nc);
+		if (flags == GSAccessFlags::NONE)
+			continue;
+		if (HasFlag(flags, GSAccessFlags::BAN))
+			continue;
+		if (!show_hidden && !HasFlag(g.flags, GSGroupFlags::PUBLIC))
+			continue;
+		out.push_back(g.name);
+	}
+}
+
 bool GroupServCore::ListGroups(CommandSource& source, const Anope::string& pattern)
 {
-	if (!this->IsAuspex(source))
+	if (!source.GetAccount())
 	{
-		this->Reply(source, "Access denied.");
-		return false;
-	}
-	if (pattern.empty())
-	{
-		this->Reply(source, "Syntax: LIST <pattern>");
+		this->Reply(source, "You must be identified to use LIST.");
 		return false;
 	}
 
+	const bool can_see_private = this->IsAuspex(source);
+	const Anope::string effective_pattern = pattern.empty() ? "!*" : pattern;
+
 	unsigned int matches = 0;
-	this->ReplyF(source, "Groups matching pattern %s:", pattern.c_str());
+	this->ReplyF(source, "Groups matching pattern %s:", effective_pattern.c_str());
 
 	std::vector<Anope::string> names;
 	names.reserve(this->groups.size());
 	for (const auto& [_, g] : this->groups)
+	{
+		if (!can_see_private && !HasFlag(g.flags, GSGroupFlags::PUBLIC))
+			continue;
 		names.push_back(g.name);
+	}
 	std::sort(names.begin(), names.end());
 	for (const auto& name : names)
 	{
-		if (!Anope::Match(name, pattern))
+		if (!Anope::Match(name, effective_pattern))
 			continue;
 		this->ReplyF(source, "- %s", name.c_str());
 		++matches;
 	}
 
 	if (!matches)
-		this->ReplyF(source, "No groups matched pattern %s", pattern.c_str());
+		this->ReplyF(source, "No groups matched pattern %s", effective_pattern.c_str());
 	else
-		this->ReplyF(source, "%u match(es) for pattern %s", matches, pattern.c_str());
+		this->ReplyF(source, "%u match(es) for pattern %s", matches, effective_pattern.c_str());
 	return true;
 }
 
@@ -989,8 +1321,14 @@ bool GroupServCore::JoinGroup(CommandSource& source, const Anope::string& groupn
 	}
 
 	const auto acct = NormalizeKey(source.GetAccount()->display);
-	if (g->access.find(acct) != g->access.end())
+	auto existing = g->access.find(acct);
+	if (existing != g->access.end())
 	{
+		if (HasFlag(existing->second, GSAccessFlags::BAN))
+		{
+			this->ReplyF(source, "You are banned from group %s.", g->name.c_str());
+			return false;
+		}
 		this->ReplyF(source, "You are already a member of group %s.", g->name.c_str());
 		return false;
 	}
@@ -1276,6 +1614,59 @@ bool GroupServCore::SetOption(CommandSource& source, const Anope::string& groupn
 		}
 	}
 
+	if (up == "GROUPNAME")
+	{
+		Anope::string newname = value;
+		newname.trim();
+		if (!is_founder)
+		{
+			this->Reply(source, "Access denied.");
+			return false;
+		}
+		if (!IsValidGroupName(newname))
+		{
+			this->Reply(source, "Syntax: SET <!group> GROUPNAME <!newgroup>");
+			return false;
+		}
+		if (this->FindGroup(newname))
+		{
+			this->ReplyF(source, "The group %s already exists.", newname.c_str());
+			return false;
+		}
+
+		const auto oldkey = NormalizeKey(g->name);
+		const auto newkey = NormalizeKey(newname);
+		GSGroupRecord copy = *g;
+		copy.name = newname;
+
+		this->groups.erase(oldkey);
+		this->groups.emplace(newkey, copy);
+
+		for (auto& [acct, inv] : this->invites)
+		{
+			if (inv.group.equals_ci(groupname))
+				inv.group = newname;
+		}
+
+		for (auto it = this->drop_challenges.begin(); it != this->drop_challenges.end();)
+		{
+			auto bar = it->first.find('|');
+			if (bar != Anope::string::npos)
+			{
+				Anope::string gpart = it->first.substr(bar + 1);
+				if (gpart.equals_ci(oldkey) || gpart.equals_ci(newkey))
+				{
+					it = this->drop_challenges.erase(it);
+					continue;
+				}
+			}
+			++it;
+		}
+
+		this->SaveDB();
+		this->ReplyF(source, "Group %s has been renamed to %s.", groupname.c_str(), newname.c_str());
+		return true;
+	}
 	if (up == "DESCRIPTION")
 	{
 		g->description = value;
@@ -1310,7 +1701,6 @@ bool GroupServCore::SetOption(CommandSource& source, const Anope::string& groupn
 		v.trim();
 		if (v.empty() || v.equals_ci("OFF") || v.equals_ci("NONE"))
 		{
-			g->joinflags_raw.clear();
 			g->joinflags = GSAccessFlags::NONE;
 			this->SaveDB();
 			this->ReplyF(source, "The group-specific join flags for %s have been cleared.", g->name.c_str());
@@ -1321,10 +1711,48 @@ bool GroupServCore::SetOption(CommandSource& source, const Anope::string& groupn
 			this->Reply(source, "You can't set join flags to be removed.");
 			return false;
 		}
-		g->joinflags_raw = v;
 		g->joinflags = this->ParseFlags(v, false, GSAccessFlags::NONE);
+		// Atheme behavior: if invalid, JOINFLAGS becomes "+" (all except founder).
+		if (g->joinflags == GSAccessFlags::NONE)
+			g->joinflags = GSAccessFlags::ALL_NOFOUNDER;
 		this->SaveDB();
 		this->ReplyF(source, "Join flags of %s set to %s.", g->name.c_str(), v.c_str());
+		return true;
+	}
+	if (up == "VHOST")
+	{
+		Anope::string v = value;
+		v.trim();
+		if (v.empty())
+		{
+			this->Reply(source, "Syntax: SET <!group> VHOST <hostmask|OFF>");
+			return false;
+		}
+		if (v.equals_ci("OFF") || v.equals_ci("NONE"))
+		{
+			g->vhost.clear();
+			this->SaveDB();
+			this->ReplyF(source, "VHost for %s cleared.", g->name.c_str());
+			return true;
+		}
+
+		Anope::string user, host;
+		if (!ParseHostMask(v, user, host))
+		{
+			this->Reply(source, "Syntax: SET <!group> VHOST <hostmask|OFF>");
+			return false;
+		}
+		if (!IRCD || !IRCD->CanSetVHost)
+		{
+			this->Reply(source, "Your IRCd does not support vhosts.");
+			return false;
+		}
+		if (!ValidateHostMask(source, user, host))
+			return false;
+
+		g->vhost = (!user.empty() ? user + "@" : "") + host;
+		this->SaveDB();
+		this->ReplyF(source, "VHost for %s set to %s.", g->name.c_str(), g->vhost.c_str());
 		return true;
 	}
 	if (up == "OPEN")
@@ -1373,4 +1801,176 @@ bool GroupServCore::SetOption(CommandSource& source, const Anope::string& groupn
 
 	this->Reply(source, "Unknown setting.");
 	return false;
+}
+
+void GroupServCore::ClampMemos(GSGroupRecord& g)
+{
+	if (this->maxgroupmemos == 0)
+		return;
+	if (g.memos.size() <= this->maxgroupmemos)
+		return;
+
+	const size_t drop = g.memos.size() - this->maxgroupmemos;
+	g.memos.erase(g.memos.begin(), g.memos.begin() + static_cast<ptrdiff_t>(drop));
+}
+
+bool GroupServCore::SendMemo(CommandSource& source, const Anope::string& groupname, const Anope::string& text)
+{
+	if (!source.GetAccount())
+	{
+		this->Reply(source, "You must be identified to use this command.");
+		return false;
+	}
+
+	if (Anope::ReadOnly && !source.IsOper())
+	{
+		this->Reply(source, READ_ONLY_MODE);
+		return false;
+	}
+
+	auto* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "Group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	if (!this->HasAccess(*g, source.GetAccount(), GSAccessFlags::MEMO) && !this->IsAuspex(source))
+	{
+		this->Reply(source, ACCESS_DENIED);
+		return false;
+	}
+
+	if (text.empty())
+	{
+		this->Reply(source, "Memo text cannot be empty.");
+		return false;
+	}
+
+	if (this->maxgroupmemos != 0 && g->memos.size() >= this->maxgroupmemos)
+	{
+		this->ReplyF(source, "Group %s already has too many memos (%u).", g->name.c_str(), this->maxgroupmemos);
+		return false;
+	}
+
+	GSGroupRecord::Memo m;
+	m.sender = source.GetAccount()->display;
+	m.time = Anope::CurTime;
+	m.text = text;
+	g->memos.push_back(std::move(m));
+	this->ClampMemos(*g);
+	this->SaveDB();
+	this->ReplyF(source, "Memo sent to %s.", g->name.c_str());
+	return true;
+}
+
+bool GroupServCore::ListMemos(CommandSource& source, const Anope::string& groupname)
+{
+	if (!source.GetAccount())
+	{
+		this->Reply(source, "You must be identified to use this command.");
+		return false;
+	}
+
+	auto* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "Group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	if (!this->HasAccess(*g, source.GetAccount(), GSAccessFlags::MEMO) && !this->IsAuspex(source))
+	{
+		this->Reply(source, ACCESS_DENIED);
+		return false;
+	}
+
+	if (g->memos.empty())
+	{
+		this->ReplyF(source, "No memos for %s.", g->name.c_str());
+		return true;
+	}
+
+	this->ReplyF(source, "Memos for %s:", g->name.c_str());
+	for (size_t i = 0; i < g->memos.size(); ++i)
+	{
+		const auto& m = g->memos[i];
+		this->ReplyF(source, "[%zu] %s (%s)", i + 1, m.sender.c_str(), Anope::strftime(m.time, source.GetAccount(), true).c_str());
+	}
+	return true;
+}
+
+bool GroupServCore::ReadMemo(CommandSource& source, const Anope::string& groupname, unsigned index)
+{
+	if (!source.GetAccount())
+	{
+		this->Reply(source, "You must be identified to use this command.");
+		return false;
+	}
+
+	auto* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "Group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	if (!this->HasAccess(*g, source.GetAccount(), GSAccessFlags::MEMO) && !this->IsAuspex(source))
+	{
+		this->Reply(source, ACCESS_DENIED);
+		return false;
+	}
+
+	if (index == 0 || index > g->memos.size())
+	{
+		this->Reply(source, "Invalid memo number.");
+		return false;
+	}
+
+	const auto& m = g->memos[index - 1];
+	this->ReplyF(source, "Memo %u for %s:", index, g->name.c_str());
+	this->ReplyF(source, "From: %s", m.sender.c_str());
+	this->ReplyF(source, "Date: %s", Anope::strftime(m.time, source.GetAccount(), true).c_str());
+	this->ReplyF(source, "Text: %s", m.text.c_str());
+	return true;
+}
+
+bool GroupServCore::DelMemo(CommandSource& source, const Anope::string& groupname, unsigned index)
+{
+	if (!source.GetAccount())
+	{
+		this->Reply(source, "You must be identified to use this command.");
+		return false;
+	}
+
+	if (Anope::ReadOnly && !source.IsOper())
+	{
+		this->Reply(source, READ_ONLY_MODE);
+		return false;
+	}
+
+	auto* g = this->FindGroup(groupname);
+	if (!g)
+	{
+		this->ReplyF(source, "Group %s does not exist.", groupname.c_str());
+		return false;
+	}
+
+	// Deleting shared memos is a management action.
+	if (!this->HasAccess(*g, source.GetAccount(), GSAccessFlags::SET) && !this->IsAuspex(source))
+	{
+		this->Reply(source, ACCESS_DENIED);
+		return false;
+	}
+
+	if (index == 0 || index > g->memos.size())
+	{
+		this->Reply(source, "Invalid memo number.");
+		return false;
+	}
+
+	g->memos.erase(g->memos.begin() + static_cast<ptrdiff_t>(index - 1));
+	this->SaveDB();
+	this->ReplyF(source, "Deleted memo %u for %s.", index, g->name.c_str());
+	return true;
 }
