@@ -66,6 +66,18 @@ public:
 			return;
 		}
 
+		// PREVENT users with NOEXPIRE from dropping their accounts  -siniStar
+		if (na->HasExt("NS_NO_EXPIRE") && !is_mine)
+		{
+			source.Reply(_("\002%s\002 cannot be dropped. For more information, see IRC4Fun Staff."), na->nick.c_str());
+			return;
+		}
+		if (na->HasExt("NS_NO_EXPIRE") && is_mine)
+		{
+			source.Reply(_("\002%s\002 cannot be dropped. You will need a Services Root to drop your account for you."), na->nick.c_str());
+			return;
+		}
+
 		auto *code = dropcode.Get(na);
 		if (params.size() < 2 || ((!code || !code->equals_ci(params[1])) && (!source.HasPriv("nickserv/drop/override") || params[1] != "OVERRIDE")))
 		{
