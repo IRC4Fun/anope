@@ -30,6 +30,7 @@ enum class GSGroupFlags : unsigned int
 	PUBLIC = 1 << 1,
 	REGNOLIMIT = 1 << 2,
 	ACSNOLIMIT = 1 << 3,
+	VHOSTAUTO = 1 << 4,
 };
 
 inline GSGroupFlags operator|(GSGroupFlags a, GSGroupFlags b)
@@ -212,7 +213,9 @@ private:
 	unsigned int maxgroupacs = 0;
 	unsigned int maxgroupmemos = 50; // 0 = unlimited
 	bool enable_open_groups = true;
+	bool opers_only = false;
 	GSAccessFlags default_joinflags = GSAccessFlags::NONE;
+	bool default_vhostauto = false;
 	
 	time_t save_interval = 600;
 
