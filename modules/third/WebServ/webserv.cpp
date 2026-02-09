@@ -19,6 +19,8 @@
  * Example configuration → webserv.example.conf
  */
 
+/// $LinkerFlags:  -lcrypto -lssl -lcurl -lnlohmann_json
+
 #include "webserv.h"
 
 #include <nlohmann/json.hpp>

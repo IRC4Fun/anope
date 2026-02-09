@@ -24,6 +24,7 @@ jobs:
             gettext \
             git \
             libargon2-dev \
+            libcurl4-openssl-dev \
             libgnutls28-dev \
             libldap2-dev \
             libmysqlclient-dev \
@@ -31,7 +32,8 @@ jobs:
             libsqlite3-dev \
             libssl-dev \
             libtre-dev \
-            ninja-build
+            ninja-build \
+            nlohmann-json3-dev
 
       - name: Enable extras
         run: |
