@@ -1,6 +1,8 @@
 [requires]
 argon2/20190702
+libcurl/8.6.0
 libmysqlclient/8.1.0
+nlohmann_json/3.11.3
 openssl/3.2.1
 pcre2/10.42
 sqlite3/3.45.1
@@ -9,6 +11,7 @@ libgettext/0.22
 
 [options]
 argon2/*:shared=True
+libcurl/*:shared=True
 libmysqlclient/*:shared=True
 openssl/*:shared=True
 pcre2/*:shared=True
