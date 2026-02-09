@@ -24,11 +24,13 @@ jobs:
             argon2-dev \
             clang \
             cmake \
+            curl-dev \
             g++ \
             gettext \
             git \
             gnutls-dev \
             mariadb-dev \
+            nlohmann-json \
             openldap-dev \
             openssl-dev \
             pcre2-dev \
