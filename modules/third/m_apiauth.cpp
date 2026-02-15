@@ -20,7 +20,7 @@ under the terms of the GNU General Public License.
 #include "serialize.h"
 #include "modules/encryption.h"
 #include "modules/nickserv/sasl.h"
-#include "sasl_scram.h"
+#include "modules/sasl_scram.h"
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
