@@ -200,9 +200,25 @@ public:
         }
         catch (const jwt::error::token_verification_exception &e)
         {
-            source.Reply(_("Invalid or malformed OAuth token."));
-            Log(me, "oauth") << u->GetMask() << " failed JWT verification for \002" << username 
-                             << "\002: " << e.what();
+            // Check if it's an expiration error based on the message
+            std::string error_msg = e.what();
+            if (error_msg.find("expired") != std::string::npos)
+            {
+                source.Reply(_("OAuth token has expired. Please obtain a new token from the website."));
+                Log(me, "oauth") << u->GetMask() << " used expired OAuth token for \002" << username << "\002";
+            }
+            else if (error_msg.find("signature") != std::string::npos)
+            {
+                source.Reply(_("OAuth token signature verification failed."));
+                Log(me, "oauth") << u->GetMask() << " failed OAuth signature verification for \002" << username 
+                                 << "\002: " << e.what();
+            }
+            else
+            {
+                source.Reply(_("Invalid or malformed OAuth token."));
+                Log(me, "oauth") << u->GetMask() << " failed JWT verification for \002" << username 
+                                 << "\002: " << e.what();
+            }
             u->BadPassword();
         }
         catch (const std::exception &e)

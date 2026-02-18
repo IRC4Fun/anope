@@ -639,7 +639,25 @@ public:
 
     ~ApiAuthVerifierEntry() override
     {
-        ApiAuthVerifierList->erase(this->account);
+        auto it = ApiAuthVerifierList->find(this->account);
+        if (it != ApiAuthVerifierList->end() && it->second == this)
+            ApiAuthVerifierList->erase(it);
+    }
+
+    void SetAccount(const Anope::string &acct)
+    {
+        if (this->account.equals_ci(acct))
+        {
+            this->account = acct;
+            return;
+        }
+
+        auto old = ApiAuthVerifierList->find(this->account);
+        if (old != ApiAuthVerifierList->end() && old->second == this)
+            ApiAuthVerifierList->erase(old);
+
+        this->account = acct;
+        ApiAuthVerifierList->insert_or_assign(this->account, this);
     }
 
     static ApiAuthVerifierEntry *Find(const Anope::string &acct)
@@ -686,7 +704,9 @@ public:
         ApiAuthVerifierEntry *v = nullptr;
         if (obj)
         {
-            v = anope_dynamic_static_cast<ApiAuthVerifierEntry *>(obj);
+            v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
+            if (!v)
+                return nullptr;
         }
         else
         {
@@ -695,7 +715,7 @@ public:
                 v = new ApiAuthVerifierEntry(account);
         }
 
-        v->account = account;
+        v->SetAccount(account);
         data["scram_sha512_verifier"] >> v->scram_sha512_verifier;
         data["scram_sha256_verifier"] >> v->scram_sha256_verifier;
         return v;
@@ -1662,22 +1682,19 @@ public:
                 bool stored512 = false;
                 if (this->scram)
                 {
-                    const bool needs_refresh = !this->scram->HasVerifier(na->nc) || this->scram->VerifierHasUnsafeSalt(na->nc);
-                    if (needs_refresh)
-                    {
-                        // Prefer the API-provided verifier if present; otherwise derive from password.
-                        if (!response.scram_sha512_verifier.empty())
-                            stored512 = this->scram->SetVerifierFromEncoded(na->nc, response.scram_sha512_verifier);
-                        // If the API verifier is missing or client-incompatible, derive locally (generates a "safe" salt).
-                        if (!stored512 || this->scram->VerifierHasUnsafeSalt(na->nc))
-                            stored512 = this->scram->SetVerifierFromPassword(na->nc, req->GetPassword());
-                    }
+                    // Refresh verifier on every successful API login.
+                    // Prefer API-provided encoded verifier when available.
+                    if (!response.scram_sha512_verifier.empty())
+                        stored512 = this->scram->SetVerifierFromEncoded(na->nc, response.scram_sha512_verifier);
+                    // If API verifier is missing/invalid or client-incompatible, derive from current password.
+                    if (!stored512 || this->scram->VerifierHasUnsafeSalt(na->nc))
+                        stored512 = this->scram->SetVerifierFromPassword(na->nc, req->GetPassword());
                 }
                 else
                 {
                     // If another module provides the mechanism, try to use its shared verifier service.
                     ServiceReference<SASLScram::VerifierService> svc("SASLScram::VerifierService", "SCRAM-SHA-512");
-                    if (svc && !svc->HasVerifier(na->nc))
+                    if (svc)
                     {
                         svc->SetVerifierFromPassword(na->nc, req->GetPassword());
                         stored512 = svc->HasVerifier(na->nc);
@@ -1690,19 +1707,16 @@ public:
                 bool stored256 = false;
                 if (this->scram256)
                 {
-                    const bool needs_refresh = !this->scram256->HasVerifier(na->nc) || this->scram256->VerifierHasUnsafeSalt(na->nc);
-                    if (needs_refresh)
-                    {
-                        if (!response.scram_sha256_verifier.empty())
-                            stored256 = this->scram256->SetVerifierFromEncoded(na->nc, response.scram_sha256_verifier);
-                        if (!stored256 || this->scram256->VerifierHasUnsafeSalt(na->nc))
-                            stored256 = this->scram256->SetVerifierFromPassword(na->nc, req->GetPassword());
-                    }
+                    // Refresh verifier on every successful API login.
+                    if (!response.scram_sha256_verifier.empty())
+                        stored256 = this->scram256->SetVerifierFromEncoded(na->nc, response.scram_sha256_verifier);
+                    if (!stored256 || this->scram256->VerifierHasUnsafeSalt(na->nc))
+                        stored256 = this->scram256->SetVerifierFromPassword(na->nc, req->GetPassword());
                 }
                 else
                 {
                     ServiceReference<SASLScram::VerifierService> svc("SASLScram::VerifierService", "SCRAM-SHA-256");
-                    if (svc && !svc->HasVerifier(na->nc))
+                    if (svc)
                     {
                         svc->SetVerifierFromPassword(na->nc, req->GetPassword());
                         stored256 = svc->HasVerifier(na->nc);
@@ -1711,6 +1725,10 @@ public:
 
                 if (stored256)
                     Log(LOG_COMMAND) << "[api_auth]: Stored SCRAM-SHA-256 verifier for " << na->nc->display;
+
+                if (!stored512 && !stored256)
+                    Log(LOG_NORMAL) << "[api_auth]: WARNING: successful API login for " << na->nc->display
+                                    << " but no SCRAM verifier was persisted (check SCRAM mechanism/service configuration)";
             }
 
             if (!response.email.empty() && response.email != na->nc->email) {
@@ -1718,6 +1736,11 @@ public:
                 if (user && NickServ)
                     user->SendMessage(NickServ, _("E-mail set to \002%s\002."), response.email.c_str());
             }
+
+            // Force immediate disk persistence for login-time updates.
+            // QueueUpdate() marks objects dirty but backend save may be deferred.
+            Anope::SaveDatabases();
+
             // Optionally, store the JWT token (response.access_token) for further usage.
             req->Success(me, na);
         } else {
@@ -1928,6 +1951,9 @@ public:
             this->scram256_mech.reset();
             BroadcastSaslMechsIfSynced();
         }
+
+        Log(LOG_COMMAND) << "[api_auth]: Loaded " << ApiAuthVerifierList->size()
+                         << " persisted SCRAM verifier record(s) from database";
     }
 
     void OnPreUplinkSync(Server *) override
