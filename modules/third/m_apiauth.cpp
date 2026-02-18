@@ -1463,13 +1463,22 @@ public:
         std::string passParam(api_password_param.c_str());
         std::string url(api_url.c_str());
 
+        // If the user authenticates with a grouped alias, authenticate against the
+        // canonical account display on the external API.
+        Anope::string api_account = req->GetAccount();
+        if (auto *na = NickAlias::Find(req->GetAccount()))
+        {
+            if (na->nc && !na->nc->display.empty())
+                api_account = na->nc->display;
+        }
+
         const auto &pw = req->GetPassword();
         Log(LOG_COMMAND) << "[api_auth]: Target URL: " << api_url;
-        Log(LOG_COMMAND) << "[api_auth]: Account='" << req->GetAccount() << "' password_present="
+        Log(LOG_COMMAND) << "[api_auth]: Account='" << req->GetAccount() << "' api_account='" << api_account << "' password_present="
                  << (!pw.empty() ? "yes" : "no") << " password_length=" << pw.length();
         Log(LOG_COMMAND) << "[api_auth]: API key configured: " << (!api_key.empty() ? "yes" : "no");
         
-        std::unique_ptr<char, decltype(&curl_free)> escaped_user(curl_easy_escape(curl.get(), req->GetAccount().c_str(), 0), &curl_free);
+        std::unique_ptr<char, decltype(&curl_free)> escaped_user(curl_easy_escape(curl.get(), api_account.c_str(), 0), &curl_free);
         std::unique_ptr<char, decltype(&curl_free)> escaped_pass(curl_easy_escape(curl.get(), req->GetPassword().c_str(), 0), &curl_free);
 
         const bool use_json_payload = api_request_format.equals_ci("json");
@@ -1488,7 +1497,7 @@ public:
             if (use_json_payload)
             {
                 json payload;
-                payload[std::string(userParam)] = std::string(req->GetAccount().c_str());
+                payload[std::string(userParam)] = std::string(api_account.c_str());
                 payload[std::string(passParam)] = std::string(req->GetPassword().c_str());
                 postData = payload.dump();
             }
@@ -1569,7 +1578,7 @@ public:
             curl_easy_setopt(curl.get(), CURLOPT_CAINFO, api_cainfo.c_str());
         }
 
-        Log(LOG_COMMAND) << "[api_auth]: 🔄 Making API request for user @" << req->GetAccount() << "@";
+        Log(LOG_COMMAND) << "[api_auth]: 🔄 Making API request for user @" << api_account << "@";
         CURLcode res = curl_easy_perform(curl.get());
         if (res != CURLE_OK)
         {
