@@ -309,7 +309,7 @@ private:
 
 		for (const auto &[key, value] : data.data)
 		{
-			yyjson_mut_val *v;
+			yyjson_mut_val *v = nullptr;
 			switch (data.GetType(key))
 			{
 				case Serialize::DataType::BOOL:
@@ -331,6 +331,9 @@ private:
 					v = yyjson_mut_uint(doc, Anope::Convert<uint64_t>(value.str(), 0));
 					break;
 			}
+
+			if (!v)
+				continue;
 
 			auto *k = yyjson_mut_strncpy(doc, key.c_str(), key.length());
 			yyjson_mut_obj_add(elem, k, v);

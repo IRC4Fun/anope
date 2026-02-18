@@ -417,7 +417,7 @@ unsigned int ChanFixCore::CountOps(Channel* c) const
 	{
 		if (!u || !cuc)
 			continue;
-		if (cuc->status.HasMode(this->op_status_char))
+		if (c->HasUserStatus(u, "OP"))
 			++n;
 	}
 	return n;
@@ -577,7 +577,7 @@ bool ChanFixCore::CanStartFix(const CFChannelData& rec, Channel* c) const
 	{
 		if (!u || !cuc || u == this->chanfix)
 			continue;
-		if (cuc->status.HasMode(this->op_status_char))
+		if (c->HasUserStatus(u, "OP"))
 			continue;
 
 		const CFOpRecord* orec = nullptr;
@@ -611,7 +611,7 @@ bool ChanFixCore::FixChannel(CFChannelData& rec, Channel* c)
 		if (!u || !cuc || u == this->chanfix)
 			continue;
 
-		const bool is_opped = cuc->status.HasMode(this->op_status_char);
+		const bool is_opped = c->HasUserStatus(u, "OP");
 		unsigned int score = 0;
 		if (auto it = rec.oprecords.find(this->KeyForUser(u)); it != rec.oprecords.end())
 			score = this->CalculateScore(it->second);
@@ -786,12 +786,6 @@ void ChanFixCore::OnReload(Configuration::Conf& conf)
 	this->autofix_interval = mod->Get<time_t>("autofix_interval", "60");
 	this->expire_divisor = mod->Get<unsigned int>("expire_divisor", "672");
 
-	ChannelMode* opmode = ModeManager::FindChannelModeByName("OP");
-	ChannelModeStatus* cms = anope_dynamic_static_cast<ChannelModeStatus*>(opmode);
-	if (cms)
-		this->op_status_char = cms->mchar;
-	else
-		this->op_status_char = 'o';
 }
 
 bool ChanFixCore::IsAdmin(CommandSource& source) const
@@ -823,7 +817,7 @@ void ChanFixCore::GatherTick()
 		{
 			if (!u || !cuc)
 				continue;
-			if (!cuc->status.HasMode(this->op_status_char))
+			if (!c->HasUserStatus(u, "OP"))
 				continue;
 			dirty |= this->UpdateOpRecord(rec, u);
 		}
@@ -1026,8 +1020,8 @@ bool ChanFixCore::RequestFixFromChanServ(CommandSource& source, const Anope::str
 			return false;
 		}
 
-		ChanUserContainer* cuc = c->FindUser(u);
-		if (!cuc || !cuc->status.HasMode(this->op_status_char))
+		Membership* cuc = c->FindUser(u);
+		if (!cuc || !c->HasUserStatus(u, "OP"))
 		{
 			source.Reply(ACCESS_DENIED);
 			return false;
