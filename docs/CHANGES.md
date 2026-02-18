@@ -1,20 +1,50 @@
 # Anope Change Log
 
-## Anope 2.1.21 (unreleased)
+## Anope 2.1.22 (unreleased)
+
+### Breaking Changes
+
+* Conan 2 is now used for packaging dependencies on Windows. If you are building from source you will need to upgrade Conan.
+
+* Non-breaking spaces in translatable messages now use 0x1B instead of 0x1A due to recent msgfmt releases treating 0x1A as an EOF character. If you have an out of tree translation you will need to update it.
+
+## Changes
+
+* The regex_posix module is now available on Windows (using the PCRE2 POSIX compatibility layer).
+
+* The regex_tre module is now available on Windows.
+
+* The Windows dependencies have been updated.
+
+## Anope 2.1.21 (2026-02-07)
 
 ### Breaking Changes
 
 * `{fantasy}:fantasycharacter` has been replaced with `{fantasy}:prefix` which allows multiple-character fantasy prefixes. If you have multiple custom fantasy characters set you should separate them with a space when upgrading your config.
 
+* The db_json module will now terminate the process if it fails to write the database. This replicates the behaviour previously used by the db_flatfile module.
+
+* When adding an unregistered user to an access list you must now explicitly specify their hostmask. This prevents accidentally adding a hostmask which is too wide.
+
 ### Changes
+
+* Added cleaning up of hostmasks when adding them to an access list and `{chanserv}:disallow_malformed_hostmask` to allow rejecting them instead.
+
+* Changed access commands to add the account of a user who is logged in to an account but not using a nickname belonging to that account.
 
 * Fixed a crash when clearing channel entry messages.
 
 * Fixed a memory leak when cloning akicks.
 
+* Fixed cleaning up ban masks.
+
 * Fixed confirming accounts using the webcpanel.
 
+* Fixed importing the time a nickname was used from Atheme.
+
 * Fixed limiting the number of accounts per email address.
+
+* Fixed locking modes that take a parameter when they are added.
 
 * Fixed the `chanserv/enforce` command erroneously enforcing against channel founders.
 

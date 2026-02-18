@@ -351,9 +351,10 @@ void User::SendMessage(BotInfo *source, const Anope::string &msg)
 
 void User::SendMessage(CommandSource &source, const Anope::string &msg)
 {
+	// TODO: remove support for the draft tag when other software catches up.
 	Anope::map<Anope::string> tags;
 	if (!source.msgid.empty())
-		tags["+draft/reply"] = source.msgid;
+		tags["+draft/reply"] = tags["+reply"] = source.msgid;
 
 	SendMessageInternal(*source.service, this, msg, tags);
 }
@@ -738,7 +739,7 @@ const User::ModeList &User::GetModeList() const
 	return modes;
 }
 
-ChanUserContainer *User::FindChannel(Channel *c) const
+Membership *User::FindChannel(Channel *c) const
 {
 	User::ChanUserList::const_iterator it = this->chans.find(c);
 	if (it != this->chans.end())

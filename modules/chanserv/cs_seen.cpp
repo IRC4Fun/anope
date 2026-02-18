@@ -232,7 +232,7 @@ public:
 				"database that were added within \037time\037."
 				"\n\n"
 				"Example:\n"
-				" %s\032CLEAR\03230m\n"
+				" %s\033CLEAR\03330m\n"
 				" Will remove all entries that were added within the last 30 minutes."
 			),
 			source.command.nobreak().c_str());
@@ -420,9 +420,9 @@ public:
 		UpdateUser(u, PART, u->nick, "", channel, msg);
 	}
 
-	void OnPreUserKicked(const MessageSource &source, ChanUserContainer *cu, const Anope::string &msg) override
+	void OnPreUserKicked(const MessageSource &source, Membership *memb, const Anope::string &msg) override
 	{
-		UpdateUser(cu->user, KICK, cu->user->nick, source.GetSource(), cu->chan->name, msg);
+		UpdateUser(memb->user, KICK, memb->user->nick, source.GetSource(), memb->chan->name, msg);
 	}
 
 private:

@@ -4,31 +4,34 @@ if(WIN32)
 endif()
 
 # enable extra modules if conan is used
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../conanbuildinfo.cmake")
-  function(enable_extra NAME PACKAGE)
-    if(DEFINED "CONAN_${PACKAGE}_ROOT")
-      message("Enabling the ${NAME} module")
-      # copy the modules out of extra so it gets picked up by build_modules
-      file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/extra/${NAME}.cpp" DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}")
-    else()
-      message("Unable to enable the ${NAME} module (missing library)")
-    endif()
-  endfunction()
-
+if(WIN32 AND DEFINED CMAKE_TOOLCHAIN_FILE)
   function(copy_extra NAME)
+    # copy the modules out of extra so it gets picked up by build_modules
+    message("Enabling the ${NAME} module")
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/extra/${NAME}.cpp" DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}")
   endfunction()
 
-  enable_extra("enc_argon2" "ARGON2")
-  enable_extra("mysql" "LIBMYSQLCLIENT")
+  function(enable_extra NAME PACKAGE)
+    find_package(${PACKAGE})
+    if(${PACKAGE}_FOUND)
+      copy_extra(${NAME})
+    else()
+      message("Unable to enable the ${NAME} module (missing ${PACKAGE} library)")
+    endif()
+  endfunction()
+
+  enable_extra("enc_argon2" "argon2")
+  enable_extra("mysql" "libmysqlclient")
   enable_extra("regex_pcre2" "PCRE2")
-  enable_extra("sqlite" "SQLITE3")
-  enable_extra("ssl_openssl" "OPENSSL")
+  enable_extra("regex_posix" "PCRE2")
+  enable_extra("regex_tre" "tre")
+  enable_extra("sqlite" "SQLite3")
+  enable_extra("ssl_openssl" "OpenSSL")
   # this uses Wldap so should always be available
   copy_extra("ldap")
 
   # Package extra dlls
-  file(GLOB EXTRA_DLLS "${Anope_SOURCE_DIR}/extradll/bin/*.dll" "${Anope_SOURCE_DIR}/extradll/lib/*.dll")
+  file(GLOB EXTRA_DLLS "${PROJECT_BINARY_DIR}/extradll/*.dll")
   install(FILES ${EXTRA_DLLS} DESTINATION ${BIN_DIR})
 endif()
 

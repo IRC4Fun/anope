@@ -203,10 +203,10 @@ class CommandCSAKick final
 
 		for (Channel::ChanUserList::iterator it = c->users.begin(), it_end = c->users.end(); it != it_end; )
 		{
-			ChanUserContainer *uc = it->second;
+			auto *memb = it->second;
 			++it;
 
-			if (c->CheckKick(uc->user))
+			if (c->CheckKick(memb->user))
 				++count;
 		}
 
@@ -260,13 +260,7 @@ class CommandCSAKick final
 				}
 			}
 
-			Entry e("", mask);
-
-			mask = (e.nick.empty() ? "*" : e.nick) + "!"
-				+ (e.user.empty() ? "*" : e.user) + "@"
-				+ (e.host.empty() ? "*" : e.host);
-			if (!e.real.empty())
-				mask += "#" + e.real;
+			mask = Entry(mask).GetCleanMask();
 		}
 		else
 			nc = na->nc;
@@ -309,7 +303,7 @@ class CommandCSAKick final
 			for (const auto &[_, u2] : UserListByNick)
 			{
 				AccessGroup nc_access = ci->AccessFor(nc), u_access = source.AccessFor(ci);
-				Entry entry_mask("", mask);
+				Entry entry_mask(mask);
 
 				if ((ci->AccessFor(u2).HasPriv("FOUNDER") || nc_access >= u_access) && entry_mask.Matches(u2))
 				{
@@ -689,7 +683,7 @@ public:
 				"%s will ban that user from the channel, then kick "
 				"the user."
 				"\n\n"
-				"The \002%s\032ADD\002 command adds the given nick or mask "
+				"The \002%s\033ADD\002 command adds the given nick or mask "
 				"to the AutoKick list. If a \037reason\037 is given with "
 				"the command, that reason will be used when the user is "
 				"kicked; if not, the default reason is \"User has been "
@@ -698,23 +692,23 @@ public:
 				"will be added to the akick list instead of the mask. "
 				"All users within that nickgroup will then be akicked. "
 				"\n\n"
-				"The \002%s\032DEL\002 command removes the given nick or mask "
+				"The \002%s\033DEL\002 command removes the given nick or mask "
 				"from the AutoKick list. It does not, however, remove any "
 				"bans placed by an AutoKick; those must be removed "
 				"manually."
 				"\n\n"
-				"The \002%s\032LIST\002 command displays the AutoKick list, or "
+				"The \002%s\033LIST\002 command displays the AutoKick list, or "
 				"optionally only those AutoKick entries which match the "
 				"given mask."
 				"\n\n"
-				"The \002%s\032VIEW\002 command is a more verbose version of the "
-				"\002%s\032LIST\002 command."
+				"The \002%s\033VIEW\002 command is a more verbose version of the "
+				"\002%s\033LIST\002 command."
 				"\n\n"
-				"The \002%s\032ENFORCE\002 command causes %s to enforce the "
+				"The \002%s\033ENFORCE\002 command causes %s to enforce the "
 				"current akick list by removing those users who match an "
 				"akick mask."
 				"\n\n"
-				"The \002%s\032CLEAR\002 command clears all entries of the "
+				"The \002%s\033CLEAR\002 command clears all entries of the "
 				"akick list."
 			),
 			source.service->nick.c_str(),
@@ -796,7 +790,7 @@ public:
 				kick = chan != NULL && chan->FindUser(u);
 			}
 			else
-				kick = Entry("BAN", autokick->mask).Matches(u);
+				kick = Entry(autokick->mask, "BAN").Matches(u);
 
 			if (kick)
 			{

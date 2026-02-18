@@ -242,11 +242,9 @@ template<typename T>
 class CoreExport ChannelModeVirtual
 	: public T
 {
-private:
-	ChannelMode *basech;
-
 protected:
 	Anope::string base;
+	ChannelMode *basech;
 
 public:
 	ChannelModeVirtual(const Anope::string &mname, const Anope::string &basename);
@@ -263,16 +261,20 @@ public:
 /* The status a user has on a channel (+v, +h, +o) etc */
 class CoreExport ChannelStatus final
 {
-	Anope::string modes;
+private:
+	std::set<ChannelMode *> modes;
+	static bool IsValidMode(ChannelMode *cm);
+
 public:
 	ChannelStatus() = default;
 	ChannelStatus(const Anope::string &modes);
 	void AddMode(char c);
-	void DelMode(char c);
-	bool HasMode(char c) const;
+	void AddMode(ChannelMode *cm);
+	void DelMode(ChannelMode *cm);
+	bool HasMode(ChannelMode *cm) const;
 	bool Empty() const;
 	void Clear();
-	const Anope::string &Modes() const;
+	const auto &Modes() const { return modes; }
 	Anope::string BuildModePrefixList() const;
 };
 
@@ -441,17 +443,18 @@ public:
 	Anope::string nick, user, host, real;
 
 	/** Constructor
+	 * @param mask A full or partial nick!ident@host/cidr#real name mask
 	 * @param mode What mode this host is for, can be empty for unknown/no mode
-	 * @param host A full or partial nick!ident@host/cidr#real name mask
+	 * @Param real Whether to allow a real name in the mask.
 	 */
-	Entry(const Anope::string &mode, const Anope::string &host);
+	Entry(const Anope::string &mask, const Anope::string &mode = "", bool real = true);
 
 	/** Get the banned mask for this entry
 	 * @return The mask
 	 */
 	Anope::string GetMask() const;
 
-	Anope::string GetNUHMask() const;
+	Anope::string GetCleanMask() const;
 
 	/** Check if this entry matches a user
 	 * @param u The user

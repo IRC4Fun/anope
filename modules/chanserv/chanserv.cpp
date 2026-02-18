@@ -263,8 +263,8 @@ public:
 				"malicious users from \"taking over\" channels by limiting "
 				"who is allowed channel operator privileges. Available "
 				"commands are listed below; to use them, type "
-				"\002%s\032\037command\037\002. For more information on a "
-				"specific command, type \002%s\032\037command\037\002."
+				"\002%s\033\037command\037\002. For more information on a "
+				"specific command, type \002%s\033\037command\037\002."
 			),
 			ChanServ->nick.c_str(),
 			ChanServ->nick.c_str(),
@@ -462,9 +462,9 @@ public:
 	{
 		if (!always_lower && Anope::CurTime == c->created && c->ci && setter.GetUser() && !setter.GetUser()->server->IsULined())
 		{
-			ChanUserContainer *cu = c->FindUser(setter.GetUser());
+			auto *memb = c->FindUser(setter.GetUser());
 			ChannelMode *cm = ModeManager::FindChannelModeByName("OP");
-			if (cu && cm && !cu->status.HasMode(cm->mchar))
+			if (memb && cm && !memb->status.HasMode(cm))
 			{
 				/* Our -o and their mode change crossing, bounce their mode */
 				c->RemoveMode(c->ci->WhoSends(), mode, data.value);

@@ -382,11 +382,11 @@ Conf::Conf() : Block("")
 			c->botchannel = true;
 
 			/* Remove all existing modes */
-			ChanUserContainer *cu = c->FindUser(bi);
-			if (cu != NULL)
+			auto *memb = c->FindUser(bi);
+			if (memb != NULL)
 			{
-				for (auto mode : cu->status.Modes())
-					c->RemoveMode(bi, ModeManager::FindChannelModeByChar(mode), bi->GetUID());
+				for (auto mode : memb->status.Modes())
+					c->RemoveMode(bi, mode, bi->GetUID());
 			}
 			/* Set the new modes */
 			for (char want_mode : want_modes)

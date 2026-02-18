@@ -94,9 +94,10 @@ class CommandCSFlags final
 		const ChanAccess *highest = u_access.Highest();
 		const NickAlias *na = NULL;
 
+		const auto &csconf = Config->GetModule("chanserv");
 		if (IRCD->IsChannelValid(mask))
 		{
-			if (Config->GetModule("chanserv").Get<bool>("disallow_channel_access"))
+			if (csconf.Get<bool>("disallow_channel_access"))
 			{
 				source.Reply(_("Channels may not be on access lists."));
 				return;
@@ -119,35 +120,57 @@ class CommandCSFlags final
 		else
 		{
 			na = NickAlias::Find(mask);
-			if (!na && Config->GetModule("chanserv").Get<bool>("disallow_hostmask_access"))
+			if (na)
 			{
-				source.Reply(_("Masks and unregistered users may not be on access lists."));
-				return;
-			}
-			else if (na && na->nc->HasExt("NEVEROP"))
-			{
-				source.Reply(_("\002%s\002 does not wish to be added to channel access lists."),
-					na->nc->display.c_str());
-				return;
-			}
-			else if (mask.find_first_of("!*@") == Anope::string::npos && !na)
-			{
-				User *targ = User::Find(mask, true);
-				if (targ != NULL)
+				if (na->nc->HasExt("NEVEROP"))
 				{
-					mask = "*!*@" + targ->GetDisplayedHost();
+					source.Reply(_("\002%s\002 does not wish to be added to channel access lists."),
+						na->nc->display.c_str());
+					return;
+				}
+				mask = na->nick;
+			}
+			else
+			{
+				if (csconf.Get<bool>("disallow_hostmask_access"))
+				{
+					source.Reply(_("Masks and unregistered users may not be on access lists."));
+					return;
+				}
+
+				if (mask.find_first_of("!*@") == Anope::string::npos)
+				{
+					auto *targ = User::Find(mask, true);
+					if (!targ)
+					{
+						source.Reply(NICK_X_NOT_IN_USE, mask.c_str());
+						return;
+					}
+
+					auto *targnc = targ->Account();
+					if (!targnc)
+					{
+						source.Reply(NICK_X_NOT_REGISTERED, targ->nick.c_str());
+						return;
+					}
+
+					mask = targnc->display;
 					if (description.empty())
 						description = targ->nick;
 				}
 				else
 				{
-					source.Reply(NICK_X_NOT_REGISTERED, mask.c_str());
-					return;
+					// Normalize the entry mask.
+					const auto cleanmask = Entry(mask).GetCleanMask();
+					if (csconf.Get<bool>("disallow_malformed_hostmask") && cleanmask != mask)
+					{
+						source.Reply(CHAN_ACCESS_MALFORMED, cleanmask.c_str());
+						return;
+					}
+
+					mask = cleanmask;
 				}
 			}
-
-			if (na)
-				mask = na->nick;
 		}
 
 		ChanAccess *current = NULL;
@@ -182,10 +205,14 @@ class CommandCSFlags final
 			}
 		}
 
-		unsigned access_max = Config->GetModule("chanserv").Get<unsigned>("accessmax", "1000");
-		if (access_max && ci->GetDeepAccessCount() >= access_max)
+		const auto access_count = ci->GetDeepAccessCount();
+		const auto access_max = Config->GetModule("chanserv").Get<unsigned>("accessmax", "1000");
+		if (access_max && access_count >= access_max)
 		{
-			source.Reply(_("You can only have %d access entries on a channel, including access entries from other channels."), access_max);
+			if (access_count == ci->GetAccessCount())
+				source.Reply(access_max, CHAN_ACCESS_LIMIT, access_max);
+			else
+				source.Reply(access_max, CHAN_ACCESS_LIMIT_DEEP, access_max);
 			return;
 		}
 

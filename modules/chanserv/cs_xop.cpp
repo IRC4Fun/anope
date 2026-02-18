@@ -142,9 +142,10 @@ private:
 			}
 		}
 
+		const auto &csconf = Config->GetModule("chanserv");
 		if (IRCD->IsChannelValid(mask))
 		{
-			if (Config->GetModule("chanserv").Get<bool>("disallow_channel_access"))
+			if (csconf.Get<bool>("disallow_channel_access"))
 			{
 				source.Reply(_("Channels may not be on access lists."));
 				return;
@@ -167,35 +168,57 @@ private:
 		else
 		{
 			na = NickAlias::Find(mask);
-			if (!na && Config->GetModule("chanserv").Get<bool>("disallow_hostmask_access"))
+			if (na)
 			{
-				source.Reply(_("Masks and unregistered users may not be on access lists."));
-				return;
-			}
-			else if (na && na->nc->HasExt("NEVEROP"))
-			{
-				source.Reply(_("\002%s\002 does not wish to be added to channel access lists."),
-					na->nc->display.c_str());
-				return;
-			}
-			else if (mask.find_first_of("!*@") == Anope::string::npos && !na)
-			{
-				User *targ = User::Find(mask, true);
-				if (targ != NULL)
+				if (na->nc->HasExt("NEVEROP"))
 				{
-					mask = "*!*@" + targ->GetDisplayedHost();
+					source.Reply(_("\002%s\002 does not wish to be added to channel access lists."),
+						na->nc->display.c_str());
+					return;
+				}
+				mask = na->nick;
+			}
+			else
+			{
+				if (csconf.Get<bool>("disallow_hostmask_access"))
+				{
+					source.Reply(_("Masks and unregistered users may not be on access lists."));
+					return;
+				}
+
+				if (mask.find_first_of("!*@") == Anope::string::npos)
+				{
+					auto *targ = User::Find(mask, true);
+					if (!targ)
+					{
+						source.Reply(NICK_X_NOT_IN_USE, mask.c_str());
+						return;
+					}
+
+					auto *targnc = targ->Account();
+					if (!targnc)
+					{
+						source.Reply(NICK_X_NOT_REGISTERED, targ->nick.c_str());
+						return;
+					}
+
+					mask = targnc->display;
 					if (description.empty())
 						description = targ->nick;
 				}
 				else
 				{
-					source.Reply(NICK_X_NOT_REGISTERED, mask.c_str());
-					return;
+					// Normalize the entry mask.
+					const auto cleanmask = Entry(mask).GetCleanMask();
+					if (csconf.Get<bool>("disallow_malformed_hostmask") && cleanmask != mask)
+					{
+						source.Reply(CHAN_ACCESS_MALFORMED, cleanmask.c_str());
+						return;
+					}
+
+					mask = cleanmask;
 				}
 			}
-
-			if (na)
-				mask = na->nick;
 		}
 
 		for (unsigned i = 0; i < ci->GetAccessCount(); ++i)
@@ -215,10 +238,14 @@ private:
 			}
 		}
 
-		unsigned access_max = Config->GetModule("chanserv").Get<unsigned>("accessmax", "1000");
-		if (access_max && ci->GetDeepAccessCount() >= access_max)
+		const auto access_count = ci->GetDeepAccessCount();
+		const auto access_max = Config->GetModule("chanserv").Get<unsigned>("accessmax", "1000");
+		if (access_max && access_count >= access_max)
 		{
-			source.Reply(_("You can only have %d access entries on a channel, including access entries from other channels."), access_max);
+			if (access_count == ci->GetAccessCount())
+				source.Reply(access_max, CHAN_ACCESS_LIMIT, access_max);
+			else
+				source.Reply(access_max, CHAN_ACCESS_LIMIT_DEEP, access_max);
 			return;
 		}
 
@@ -577,22 +604,22 @@ public:
 
 		source.Reply(" ");
 		source.Reply(_(
-				"The \002%s\032ADD\002 command adds the given nickname to the "
+				"The \002%s\033ADD\002 command adds the given nickname to the "
 				"%s list."
 				"\n\n"
-				"The \002%s\032DEL\002 command removes the given nick from the "
+				"The \002%s\033DEL\002 command removes the given nick from the "
 				"%s list. If a list of entry numbers is given, those "
 				"entries are deleted. (See the example for LIST below.)"
 				"\n\n"
-				"The \002%s\032LIST\002 command displays the %s list. If "
+				"The \002%s\033LIST\002 command displays the %s list. If "
 				"a wildcard mask is given, only those entries matching the "
 				"mask are displayed. If a list of entry numbers is given, "
 				"only those entries are shown; for example:\n"
-				"   \002%s\032#channel\032LIST\0322-5,7-9\002\n"
+				"   \002%s\033#channel\033LIST\0332-5,7-9\002\n"
 				"      Lists %s entries numbered 2 through 5 and\n"
 				"      7 through 9."
 				"\n\n"
-				"The \002%s\032CLEAR\002 command clears all entries of the "
+				"The \002%s\033CLEAR\002 command clears all entries of the "
 				"%s list."
 			),
 			cmd.c_str(),

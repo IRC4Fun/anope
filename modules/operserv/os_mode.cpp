@@ -55,8 +55,8 @@ public:
 					if (uc->user->HasMode("OPER"))
 						continue;
 
-					for (size_t i = uc->status.Modes().length(); i > 0; --i)
-						c->RemoveMode(c->WhoSends(), ModeManager::FindChannelModeByChar(uc->status.Modes()[i - 1]), uc->user->GetUID(), false);
+					for (auto *mode : uc->status.Modes())
+						c->RemoveMode(c->WhoSends(), mode, uc->user->GetUID(), false);
 				}
 
 				source.Reply(_("All modes cleared on %s."), c->name.c_str());
@@ -135,7 +135,7 @@ public:
 			"Allows Services Operators to change modes for any channel. "
 			"Parameters are the same as for the standard /MODE command. "
 			"Alternatively, CLEAR may be given to clear all modes on the channel. "
-			"If CLEAR\032ALL is given then all modes, including user status, is removed."
+			"If CLEAR\033ALL is given then all modes, including user status, is removed."
 		));
 		return true;
 	}

@@ -55,6 +55,7 @@ public:
 		CanSVSNick = true;
 		CanSVSJoin = true;
 		CanSVSNOOP = true;
+		CanSendMultipleSWhois = true;
 		CanSetVHost = true;
 		CanSetVIdent = true;
 		CanSNLine = true;
@@ -194,16 +195,16 @@ private:
 			/* If the user is internally on the channel with flags, kill them so that
 			 * the stacker will allow this.
 			 */
-			ChanUserContainer *uc = c->FindUser(user);
-			if (uc != NULL)
-				uc->status.Clear();
+			auto *memb = c->FindUser(user);
+			if (memb != NULL)
+				memb->status.Clear();
 
 			BotInfo *setter = BotInfo::Find(user->GetUID());
-			for (auto mode : cs.Modes())
-				c->SetMode(setter, ModeManager::FindChannelModeByChar(mode), user->GetUID(), false);
+			for (auto *mode : cs.Modes())
+				c->SetMode(setter, mode, user->GetUID(), false);
 
-			if (uc != NULL)
-				uc->status = cs;
+			if (memb != NULL)
+				memb->status = cs;
 		}
 	}
 
@@ -246,13 +247,14 @@ private:
 
 		// BIGLINES: enable sending lines up to 16384 characters in length.
 		// EAUTH: communicates information about the local server.
+		// EXTSWHOIS: enable receiving extended SWHOIS messages.
 		// MLOCK: enable receiving the MLOCK message when a mode lock changes.
 		// MTAGS: enable receiving IRCv3 message tags.
 		// NEXTBANS: enables receiving named extended bans.
 		// SJSBY: enables receiving list mode setters and set timestamps.
 		// SID: communicates the unique identifier of the local server.
 		// VHP: enable receiving the vhost in UID.
-		Uplink::Send("PROTOCTL", "BIGLINES", "MLOCK", "MTAGS", "NEXTBANS", "SJSBY", "VHP");
+		Uplink::Send("PROTOCTL", "BIGLINES", "EXTSWHOIS", "MLOCK", "MTAGS", "NEXTBANS", "SJSBY", "VHP");
 		Uplink::Send("PROTOCTL", "EAUTH=" + Me->GetName() + ",,,Anope-" + Anope::VersionShort());
 		Uplink::Send("PROTOCTL", "SID=" + Me->GetSID());
 
@@ -342,9 +344,16 @@ private:
 		Uplink::Send("SENDUMODE", 'o', "From " + source.GetName() + ": " + buf);
 	}
 
-	void SendSWhois(const MessageSource &source, const Anope::string &who, const Anope::string &mask) override
+	void SendSWhois(const MessageSource &source, User *target, const Anope::string &tag, const Anope::string &message) override
 	{
-		Uplink::Send("SWHOIS", who, mask);
+		const auto utag = tag.empty() ? source.GetName() : tag;
+		Uplink::Send(source, "SWHOIS", target->GetUID(), "+", utag, 0, message);
+	}
+
+	void SendSWhoisDel(const MessageSource &source, User *target, const Anope::string &tag, const Anope::string &message) override
+	{
+		const auto utag = tag.empty() ? source.GetName() : tag;
+		Uplink::Send(source, "SWHOIS", target->GetUID(), "-", utag, 0, message.empty() ? "*" : message);
 	}
 
 	void SendEOB() override
@@ -543,9 +552,9 @@ namespace UnrealExtBan
 			Channel *c = Channel::Find(channel);
 			if (c != NULL)
 			{
-				ChanUserContainer *uc = c->FindUser(u);
-				if (uc != NULL)
-					if (cm == NULL || uc->status.HasMode(cm->mchar))
+				auto *memb = c->FindUser(u);
+				if (memb != NULL)
+					if (cm == NULL || memb->status.HasMode(cm))
 						return true;
 			}
 
@@ -564,7 +573,9 @@ namespace UnrealExtBan
 
 		bool Matches(User *u, const Entry *e) override
 		{
-			return Entry(this->base, e->GetMask()).Matches(u);
+			auto mask = e->GetMask();
+			auto *cm = basech->Unwrap(mask);
+			return Entry(mask, cm->name, false).Matches(u);
 		}
 	};
 
@@ -646,7 +657,7 @@ namespace UnrealExtBan
 			/* strip down the time (~t:1234:) and call other matchers */
 			auto real_mask = e->GetMask();
 			real_mask = real_mask.substr(real_mask.find(":") + 1);
-			return Entry("BAN", real_mask).Matches(u);
+			return Entry(real_mask, "BAN", false).Matches(u);
 		}
 	};
 

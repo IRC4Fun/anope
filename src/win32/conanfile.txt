@@ -21,6 +21,26 @@ libgettext/*:shared=True
 [imports]
 ., *.dll -> extradll
 ., *.lib -> extralib
+libgettext/0.26
+libmysqlclient/8.1.0
+openssl/3.6.1
+pcre2/10.44
+sqlite3/3.51.0
+tre/cci.20230717
+
+[tool_requires]
+gettext/0.26
+
+[options]
+*/*:shared=True
+libiconv/*:shared=False # Shared libiconv causes linker errors
+openssl/*:no_apps=True
+openssl/*:no_legacy=True
+pcre2/*:build_pcre2_16=False
+pcre2/*:build_pcre2_32=False
+pcre2/*:build_pcre2grep=False
+sqlite3/*:build_executable=False
 
 [generators]
-cmake
+CMakeDeps
+CMakeToolchain

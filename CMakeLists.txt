@@ -25,7 +25,10 @@ include(CheckFunctionExists)
 include(CheckTypeSize)
 include(CheckLibraryExists)
 include(CheckCXXCompilerFlag)
-include(FindPkgConfig)
+
+if(NOT WIN32)
+  include(FindPkgConfig)
+endif()
 
 # If extra include directories were specified, tell cmake about them.
 if(EXTRA_INCLUDE)
@@ -37,19 +40,13 @@ if(EXTRA_LIBS)
   link_directories(${EXTRA_LIBS})
 endif()
 
-# setup conan
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/conanbuildinfo.cmake")
-  include("${CMAKE_CURRENT_SOURCE_DIR}/conanbuildinfo.cmake")
-  conan_basic_setup(TARGETS)
-endif()
-
 # Find gettext
 find_package(Gettext)
 find_package(Intl)
 if(GETTEXT_FOUND AND Intl_FOUND)
   set(HAVE_LOCALIZATION ON)
   include_directories(${Intl_INCLUDE_DIRS})
-  link_libraries(${Intl_LIBRARY})
+  link_libraries(${Intl_LIBRARIES})
 else()
   message("Unable to find gettext and libintl; disabling localization")
   set(HAVE_LOCALIZATION OFF)

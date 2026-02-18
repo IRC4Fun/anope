@@ -64,24 +64,41 @@ struct StackerInfo final
 	void AddMode(Mode *mode, bool set, const ModeData &data);
 };
 
-ChannelStatus::ChannelStatus(const Anope::string &m) : modes(m)
+ChannelStatus::ChannelStatus(const Anope::string &m)
 {
+	for (const auto mc : m)
+	{
+		auto *cm = ModeManager::FindChannelModeByChar(mc);
+		if (IsValidMode(cm))
+			AddMode(cm);
+	}
+}
+
+bool ChannelStatus::IsValidMode(ChannelMode *cm)
+{
+	return cm && cm->type == MODE_STATUS;
 }
 
 void ChannelStatus::AddMode(char c)
 {
-	if (modes.find(c) == Anope::string::npos)
-		modes.append(c);
+	AddMode(ModeManager::FindChannelModeByChar(c));
 }
 
-void ChannelStatus::DelMode(char c)
+void ChannelStatus::AddMode(ChannelMode *cm)
 {
-	modes = modes.replace_all_cs(c, "");
+	if (IsValidMode(cm))
+		modes.insert(cm);
 }
 
-bool ChannelStatus::HasMode(char c) const
+void ChannelStatus::DelMode(ChannelMode *cm)
 {
-	return modes.find(c) != Anope::string::npos;
+	if (IsValidMode(cm))
+		modes.erase(cm);
+}
+
+bool ChannelStatus::HasMode(ChannelMode *cm) const
+{
+	return IsValidMode(cm) && modes.find(cm) != modes.end();
 }
 
 bool ChannelStatus::Empty() const
@@ -94,23 +111,14 @@ void ChannelStatus::Clear()
 	modes.clear();
 }
 
-const Anope::string &ChannelStatus::Modes() const
-{
-	return modes;
-}
-
 Anope::string ChannelStatus::BuildModePrefixList() const
 {
 	Anope::string ret;
 
-	for (auto mode : modes)
+	for (const auto *cm : modes)
 	{
-		ChannelMode *cm = ModeManager::FindChannelModeByChar(mode);
-		if (cm != NULL && cm->type == MODE_STATUS)
-		{
-			ChannelModeStatus *cms = anope_dynamic_static_cast<ChannelModeStatus *>(cm);
-			ret += cms->symbol;
-		}
+		const auto *cms = anope_dynamic_static_cast<const ChannelModeStatus *>(cm);
+		ret += cms->symbol;
 	}
 
 	return ret;
@@ -673,42 +681,49 @@ void ModeManager::StackerDel(Mode *m)
 	}
 }
 
-Entry::Entry(const Anope::string &m, const Anope::string &fh) : name(m), mask(fh)
+Entry::Entry(const Anope::string &m, const Anope::string &n, bool r)
+	: name(n)
+	, mask(m)
 {
-	Anope::string n, u, h;
-
-	size_t at = fh.find('@');
-	if (at != Anope::string::npos)
+	const auto first_sep = this->mask.find_first_of("!@");
+	if (first_sep == Anope::string::npos)
 	{
-		this->host = fh.substr(at + 1);
+		if (this->mask.find_first_of(".:") == Anope::string::npos)
+			this->nick = this->mask;
+		else
+			this->host = this->mask;
+	}
+	else if (this->mask[first_sep] == '!')
+	{
+		this->nick = this->mask.substr(0, first_sep);
 
-		const Anope::string &nu = fh.substr(0, at);
-
-		size_t ex = nu.find('!');
-		if (ex != Anope::string::npos)
+		const auto second_sep = this->mask.find('@');
+		if (second_sep == Anope::string::npos)
+			this->user = this->mask.substr(first_sep + 1);
+		else
 		{
-			this->user = nu.substr(ex + 1);
-			this->nick = nu.substr(0, ex);
+			this->user = this->mask.substr(first_sep + 1, second_sep - first_sep - 1);
+			this->host = this->mask.substr(second_sep + 1);
 		}
-		else
-			this->user = nu;
 	}
-	else
+	else if (this->mask[first_sep] == '@')
 	{
-		if (fh.find('.') != Anope::string::npos || fh.find(':') != Anope::string::npos)
-			this->host = fh;
-		else
-			this->nick = fh;
+		this->user = this->mask.substr(0, first_sep);
+		this->host = this->mask.substr(first_sep + 1);
 	}
 
-	at = this->host.find('#');
-	if (at != Anope::string::npos)
+	// If the mask can have a realname then extract that.
+	if (r)
 	{
-		this->real = this->host.substr(at + 1);
-		this->host = this->host.substr(0, at);
+		const auto real_sep = this->host.find('#');
+		if (real_sep != Anope::string::npos)
+		{
+			this->real = this->host.substr(real_sep + 1);
+			this->host.erase(real_sep);
+		}
 	}
 
-	/* If the mask is all *'s it will match anything, so just clear it */
+	// If the mask is all *'s it will match anything, so just clear it.
 	if (this->nick.find_first_not_of("*") == Anope::string::npos)
 		this->nick.clear();
 
@@ -719,22 +734,19 @@ Entry::Entry(const Anope::string &m, const Anope::string &fh) : name(m), mask(fh
 		this->host.clear();
 	else
 	{
-		/* Host might be a CIDR range */
-		size_t sl = this->host.find_last_of('/');
-		if (sl != Anope::string::npos)
+		// Host might be a CIDR range.
+		const auto cidr_sep = this->host.find_last_of('/');
+		if (cidr_sep != Anope::string::npos)
 		{
-			const Anope::string &cidr_ip = this->host.substr(0, sl),
-						&cidr_range = this->host.substr(sl + 1);
+			sockaddrs cidr_addr(this->host.substr(0, cidr_sep));
+			const auto cidr_range = this->host.substr(cidr_sep + 1);
 
-			sockaddrs addr(cidr_ip);
-			auto range = Anope::TryConvert<unsigned short>(cidr_range);
-			if (addr.valid() && range.has_value())
+			const auto range = Anope::TryConvert<unsigned short>(cidr_range);
+			if (cidr_addr.valid() && range.has_value())
 			{
 				this->cidr_len = range.value();
-				this->host = cidr_ip;
-				this->family = addr.family();
-
-				Log(LOG_DEBUG) << "Ban " << mask << " has cidr " << this->cidr_len;
+				this->family = cidr_addr.family();
+				this->host = cidr_addr.addr();
 			}
 		}
 	}
@@ -748,30 +760,44 @@ Anope::string Entry::GetMask() const
 	return this->mask;
 }
 
-Anope::string Entry::GetNUHMask() const
+Anope::string Entry::GetCleanMask() const
 {
-	Anope::string n = nick.empty() ? "*" : nick,
-			u = user.empty() ? "*" : user,
-			h = host.empty() ? "*" : host,
-			r = real.empty() ? "" : "#" + real,
-			c;
+	Anope::string cmask;
+	cmask.append(this->nick.empty() ? "*" : this->nick);
+	cmask.push_back('!');
+	cmask.append(this->user.empty() ? "*" : this->user);
+	cmask.push_back('@');
+	cmask.append(this->host.empty() ? "*" : this->host);
+
 	switch (family)
 	{
 		case AF_INET:
-			if (cidr_len <= 32)
-				c = "/" + Anope::ToString(cidr_len);
+		{
+			if (cidr_len < 32)
+				cmask.append("/").append(Anope::ToString(cidr_len));
 			break;
+		}
 		case AF_INET6:
-			if (cidr_len <= 128)
-				c = "/" + Anope::ToString(cidr_len);
+		{
+			if (cidr_len < 128)
+				cmask.append("/").append(Anope::ToString(cidr_len));
 			break;
+		}
 	}
 
-	return n + "!" + u + "@" + h + c + r;
+	if (!this->real.empty())
+	{
+		cmask.push_back('#');
+		cmask.append(this->real);
+	}
+
+	return cmask;
 }
 
 bool Entry::Matches(User *u, bool full) const
 {
+	Log(LOG_DEBUG) << "Checking whether " << u->GetMask() << " matches " << this->GetMask();
+
 	/* First check if this mode has defined any matches (usually for extbans). */
 	if (IRCD->IsExtbanValid(this->mask))
 	{

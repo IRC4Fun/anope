@@ -511,16 +511,16 @@ public:
 			/* If the user is internally on the channel with flags, kill them so that
 			 * the stacker will allow this.
 			 */
-			ChanUserContainer *uc = c->FindUser(user);
-			if (uc != NULL)
-				uc->status.Clear();
+			auto *memb = c->FindUser(user);
+			if (memb != NULL)
+				memb->status.Clear();
 
 			BotInfo *setter = BotInfo::Find(user->GetUID());
-			for (auto mode : cs.Modes())
-				c->SetMode(setter, ModeManager::FindChannelModeByChar(mode), user->GetUID(), false);
+			for (auto *mode : cs.Modes())
+				c->SetMode(setter, mode, user->GetUID(), false);
 
-			if (uc != NULL)
-				uc->status = cs;
+			if (memb != NULL)
+				memb->status = cs;
 		}
 	}
 
@@ -587,10 +587,36 @@ public:
 			Uplink::Send(source, "SVSPART", u->GetUID(), chan);
 	}
 
-	void SendSWhois(const MessageSource &bi, const Anope::string &who, const Anope::string &mask) override
+	void SendSWhois(const MessageSource &source, User *target, const Anope::string &tag, const Anope::string &message) override
 	{
-		User *u = User::Find(who);
-		Uplink::Send("METADATA", u->GetUID(), "swhois", mask);
+		if (!IRCD->CanSendMultipleSWhois)
+		{
+			// Old style SWHOIS.
+			Uplink::Send("METADATA", target->GetUID(), "swhois", message);
+		}
+		else
+		{
+			// New style SWHOIS.
+			Uplink::Send("METADATA", target->GetUID(), "specialwhois", Anope::Format("+ @%s s %ld :%s",
+				tag.c_str(), Anope::CurTime, message.c_str()));
+		}
+	}
+
+	void SendSWhoisDel(const MessageSource &source, User *target, const Anope::string &tag, const Anope::string &message) override
+	{
+		if (!IRCD->CanSendMultipleSWhois)
+		{
+			// Old style SWHOIS.
+			Uplink::Send("METADATA", target->GetUID(), "swhois", "");
+		}
+		else
+		{
+			// New style SWHOIS.
+			if (tag.empty())
+				Uplink::Send("METADATA", target->GetUID(), "specialwhois", Anope::Format("- :%s", message.c_str()));
+			else
+				Uplink::Send("METADATA", target->GetUID(), "specialwhois", Anope::Format("- @%s", tag.c_str()));
+		}
 	}
 
 	void SendBOB() override
@@ -777,7 +803,7 @@ namespace InspIRCdExtBan
 		}
 	};
 
-	class EntryMatcher final
+	class EntryMatcher
 		: public Base
 	{
 	public:
@@ -788,7 +814,9 @@ namespace InspIRCdExtBan
 
 		bool Matches(User *u, const Entry *e) override
 		{
-			return Entry(this->name, e->GetMask()).Matches(u);
+			auto mask = e->GetMask();
+			auto *cm = basech->Unwrap(mask);
+			return Entry(mask, cm->name, false).Matches(u);
 		}
 	};
 
@@ -817,9 +845,9 @@ namespace InspIRCdExtBan
 			Channel *c = Channel::Find(channel);
 			if (c != NULL)
 			{
-				ChanUserContainer *uc = c->FindUser(u);
-				if (uc != NULL)
-					if (cm == NULL || uc->status.HasMode(cm->mchar))
+				auto *memb = c->FindUser(u);
+				if (memb != NULL)
+					if (cm == NULL || memb->status.HasMode(cm))
 						return true;
 			}
 
@@ -888,17 +916,17 @@ namespace InspIRCdExtBan
 	};
 
 	class UnidentifiedMatcher final
-		: public Base
+		: public EntryMatcher
 	{
 	public:
 		UnidentifiedMatcher(const Anope::string &mname, const Anope::string &xname, char xchar)
-			: Base(mname, xname, xchar)
+			: EntryMatcher(mname, xname, xchar)
 		{
 		}
 
 		bool Matches(User *u, const Entry *e) override
 		{
-			return !u->Account() && Entry(this->base, e->GetMask()).Matches(u);
+			return !u->Account() && EntryMatcher::Matches(u, e);
 		}
 	};
 
@@ -1202,6 +1230,7 @@ struct IRCDMessageCapab final
 
 			Servers::Capab.clear();
 			IRCD->CanClearModes.clear();
+			IRCD->CanSendMultipleSWhois = false;
 			IRCD->CanSQLineChannel = false;
 			IRCD->CanTagMessage = false;
 			IRCD->DefaultPseudoclientModes = "+oI";
@@ -1492,6 +1521,9 @@ struct IRCDMessageCapab final
 
 				else if (modname.equals_cs("services"))
 					Servers::Capab.insert("SERVICES");
+
+				else if (modname.equals_cs("swhois_ext"))
+					IRCD->CanSendMultipleSWhois = true;
 			}
 
 			const auto &anoperegex = Config->GetBlock("options").Get<const Anope::string>("regexengine");
@@ -1878,6 +1910,9 @@ private:
 
 		else if (modname.equals_cs("services"))
 			required = true;
+
+		else if (modname.equals_cs("swhois_ext"))
+			IRCD->CanSendMultipleSWhois = plus;
 
 		else
 			return;

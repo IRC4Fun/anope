@@ -322,7 +322,7 @@ class CommandCSMode final
 				return true;
 
 			case MODE_PARAM:
-				return !anope_dynamic_static_cast<ChannelModeParam *>(cm)->minus_no_arg;
+				return adding || !anope_dynamic_static_cast<ChannelModeParam *>(cm)->minus_no_arg;
 		}
 		return false;
 	}
@@ -434,7 +434,7 @@ class CommandCSMode final
 						break;
 					}
 					Anope::string mode_param;
-					if (NeedsParam(cm, adding) && !sep.GetToken(mode_param))
+					if (NeedsParam(cm, adding && setting) && !sep.GetToken(mode_param))
 					{
 						missingparam.Push(cm, mode_param, adding);
 						break;
@@ -603,14 +603,14 @@ class CommandCSMode final
 
 								for (Channel::ChanUserList::const_iterator it = ci->c->users.begin(), it_end = ci->c->users.end(); it != it_end;)
 								{
-									ChanUserContainer *uc = it->second;
+									auto *memb = it->second;
 									++it;
 
-									AccessGroup targ_access = ci->AccessFor(uc->user);
+									AccessGroup targ_access = ci->AccessFor(memb->user);
 
-									if (uc->user->IsProtected())
+									if (memb->user->IsProtected())
 									{
-										source.Reply(_("You do not have the access to change %s's modes."), uc->user->nick.c_str());
+										source.Reply(_("You do not have the access to change %s's modes."), memb->user->nick.c_str());
 										continue;
 									}
 
@@ -622,17 +622,17 @@ class CommandCSMode final
 										}
 										else
 										{
-											source.Reply(_("You do not have the access to change %s's modes."), uc->user->nick.c_str());
+											source.Reply(_("You do not have the access to change %s's modes."), memb->user->nick.c_str());
 											continue;
 										}
 									}
 
-									if (Anope::Match(uc->user->GetMask(), param))
+									if (Anope::Match(memb->user->GetMask(), param))
 									{
 										if (adding)
-											ci->c->SetMode(NULL, cm, uc->user->GetUID());
+											ci->c->SetMode(NULL, cm, memb->user->GetUID());
 										else
-											ci->c->RemoveMode(NULL, cm, uc->user->GetUID());
+											ci->c->RemoveMode(NULL, cm, memb->user->GetUID());
 									}
 								}
 							}
@@ -811,25 +811,25 @@ public:
 				"Mainly controls mode locks and mode access (which is different from channel access) "
 				"on a channel."
 				"\n\n"
-				"The \002%s\032LOCK\002 command allows you to add, delete, and view mode locks on a channel. "
+				"The \002%s\033LOCK\002 command allows you to add, delete, and view mode locks on a channel. "
 				"If a mode is locked on or off, services will not allow that mode to be changed. The \002SET\002 "
 				"command will clear all existing mode locks and set the new one given, while \002ADD\002 and \002DEL\002 "
 				"modify the existing mode lock."
 				"\n\n"
 				"Example:\n"
-				"     \002%s\032#channel\032LOCK\032ADD\032+bmnt\032*!*@*.example.com\002\n"
+				"     \002%s\033#channel\033LOCK\033ADD\033+bmnt\033*!*@*.example.com\002\n"
 				"\n\n"
-				"The \002%s\032SET\002 command allows you to set modes through services. Wildcards * and ? may "
+				"The \002%s\033SET\002 command allows you to set modes through services. Wildcards * and ? may "
 				"be given as parameters for list and status modes."
 				"\n\n"
 				"Example:\n"
-				"     \002%s\032#channel\032SET\032+v\032*\002\n"
+				"     \002%s\033#channel\033SET\033+v\033*\002\n"
 				"       Sets voice status to all users in the channel."
 				"\n\n"
-				"     \002%s\032#channel\032SET\032-b\032~c:*\n"
+				"     \002%s\033#channel\033SET\033-b\033~c:*\n"
 				"       Clears all extended bans that start with ~c:"
 				"\n\n"
-				"The \002%s\032CLEAR\002 command is an easy way to clear modes on a channel. \037what\037 may be "
+				"The \002%s\033CLEAR\002 command is an easy way to clear modes on a channel. \037what\037 may be "
 				"any mode name. Examples include bans, excepts, inviteoverrides, ops, halfops, and voices. If \037what\037 "
 				"is not given then all basic modes are removed."
 			),

@@ -140,10 +140,12 @@ class CommandCSDown final
 {
 	static void RemoveAll(User *u, Channel *c)
 	{
-		ChanUserContainer *cu = c->FindUser(u);
-		if (cu != NULL)
-			for (size_t i = cu->status.Modes().length(); i > 0;)
-				c->RemoveMode(NULL, ModeManager::FindChannelModeByChar(cu->status.Modes()[--i]), u->GetUID());
+		auto *memb = c->FindUser(u);
+		if (memb != NULL)
+		{
+			for (auto *mode : memb->status.Modes())
+				c->RemoveMode(NULL, mode, u->GetUID());
+		}
 	}
 
 public:
