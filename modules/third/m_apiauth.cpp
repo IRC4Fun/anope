@@ -612,6 +612,22 @@ namespace
 
         return text;
     }
+
+    // Generate a random UUID v4 (RFC 4122) for webhook event_id deduplication.
+    Anope::string GenerateUUID()
+    {
+        unsigned char b[16];
+        if (RAND_bytes(b, sizeof(b)) != 1)
+            return "00000000-0000-4000-8000-000000000000";
+        b[6] = static_cast<unsigned char>((b[6] & 0x0f) | 0x40); // version 4
+        b[8] = static_cast<unsigned char>((b[8] & 0x3f) | 0x80); // variant RFC4122
+        char buf[37];
+        snprintf(buf, sizeof(buf),
+            "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+        return Anope::string(buf);
+    }
 }
 
 // ── Serializable database for SCRAM verifiers (persisted to m_apiauth.module.json) ──
@@ -1780,11 +1796,106 @@ class ModuleAPIAuth final : public Module {
     Anope::string jwt_issuer;
     Anope::string profile_url;
     Anope::string register_url;
+    Anope::string webhook_url;
+    Anope::string webhook_secret;
 
     bool enable_sasl_scram_sha512 = false;
     bool enable_sasl_scram_sha256 = true;
     unsigned scram_iterations = 4096;
     size_t scram_saltlen = 16;
+
+    // Send a GROUP or UNGROUP webhook to the Django backend.
+    // Fires synchronously (blocking up to 5 s), acceptable since this happens
+    // only on explicit user NickServ GROUP/UNGROUP commands, not per-message.
+    void SendGroupWebhook(const Anope::string &event_type, const Anope::string &account, const Anope::string &nick)
+    {
+        if (this->webhook_url.empty())
+            return;
+
+        const auto event_id = GenerateUUID();
+        const auto ts = static_cast<long long>(Anope::CurTime);
+
+        json payload;
+        payload["event_id"]   = std::string(event_id.c_str());
+        payload["event_type"] = std::string(event_type.c_str());
+        payload["account"]    = std::string(account.c_str());
+        payload["nick"]       = std::string(nick.c_str());
+        payload["ts"]         = ts;
+        const std::string body = payload.dump();
+
+        // HMAC-SHA256 signature: header value is "sha256=<lowercase hex>"
+        std::string sig_header;
+        if (!this->webhook_secret.empty())
+        {
+            const auto hmac = HmacSha256(this->webhook_secret, Anope::string(body.c_str(), body.size()));
+            if (!hmac.empty())
+                sig_header = "X-Anope-Signature: sha256=" + std::string(Anope::Hex(hmac).c_str());
+        }
+
+        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
+        if (!curl)
+        {
+            Log(LOG_NORMAL) << "[api_auth]: webhook: curl_easy_init failed";
+            return;
+        }
+
+        std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> headers(nullptr, &curl_slist_free_all);
+        auto append_hdr = [&](const std::string &h) -> bool {
+            auto *n = curl_slist_append(headers.get(), h.c_str());
+            if (!n) return false;
+            headers.release();
+            headers.reset(n);
+            return true;
+        };
+
+        if (!append_hdr("Content-Type: application/json") || !append_hdr("Accept: application/json"))
+        {
+            Log(LOG_NORMAL) << "[api_auth]: webhook: failed to build header list";
+            return;
+        }
+        if (!sig_header.empty() && !append_hdr(sig_header))
+        {
+            Log(LOG_NORMAL) << "[api_auth]: webhook: failed to append signature header";
+            return;
+        }
+
+        const std::string url(this->webhook_url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
+        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, body.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers.get());
+        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 5L);
+        curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "Anope-API-Auth/1.0");
+
+        // Reuse the same SSL settings as the main auth request.
+        const bool verify_ssl = (this->api_verify_ssl == "true" || this->api_verify_ssl == "1" || this->api_verify_ssl == "yes");
+        if (!verify_ssl)
+        {
+            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 0L);
+        }
+
+        std::string resp_buf;
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &resp_buf);
+
+        const CURLcode res = curl_easy_perform(curl.get());
+        if (res != CURLE_OK)
+        {
+            Log(LOG_NORMAL) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account
+                            << " failed: " << curl_easy_strerror(res);
+            return;
+        }
+
+        long http_code = 0;
+        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code == 200)
+            Log(LOG_COMMAND) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account << " ok";
+        else
+            Log(LOG_NORMAL) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account
+                            << " HTTP " << http_code << " body=" << resp_buf;
+    }
 
     void BroadcastSaslMechsIfSynced()
     {
@@ -1890,6 +2001,8 @@ public:
         this->jwt_issuer = config.Get<const Anope::string>("jwt_issuer", "");
         this->profile_url = config.Get<const Anope::string>("profile_url", "https://www.example/accounts/profile/%s/"); // dynamic fetch
         this->register_url = config.Get<const Anope::string>("register_url", "https://www.example/accounts/register/");
+        this->webhook_url = config.Get<const Anope::string>("webhook_url", "");
+        this->webhook_secret = config.Get<const Anope::string>("webhook_secret", "");
 
         this->enable_sasl_scram_sha512 = config.Get<bool>("enable_sasl_scram_sha512", "no");
         this->enable_sasl_scram_sha256 = config.Get<bool>("enable_sasl_scram_sha256", "yes");
@@ -2030,6 +2143,34 @@ public:
     void OnPreNickExpire(NickAlias *na, bool &expire) override {
         if (na->nick == na->nc->display && na->nc->aliases->size() > 1)
             expire = false;
+    }
+
+    // Fired by Anope when a user does /ns GROUP.
+    // u->nick is the nick being added as alias; target->nc->display is the account.
+    void OnNickGroup(User *u, NickAlias *target) override
+    {
+        if (!u || !target || !target->nc)
+            return;
+        // Skip if this is the same as the primary display (new account registration path).
+        if (u->nick.equals_ci(target->nc->display))
+            return;
+        Log(LOG_COMMAND) << "[api_auth]: webhook GROUP " << u->nick << " -> " << target->nc->display;
+        SendGroupWebhook("GROUP", target->nc->display, u->nick);
+    }
+
+    // Fired by Anope when a nick alias is destroyed (covers NS DROP of an alias).
+    // Note: NS UNGROUP does NOT destroy the alias (it reassigns it to a new NickCore),
+    // so this hook does not fire for UNGROUP. It fires for NS DROP of a grouped alias.
+    void OnDelNick(NickAlias *na) override
+    {
+        if (!na || !na->nc)
+            return;
+        // Skip when the deleted nick IS the account display — that is either a full
+        // account drop or a display change, not a grouped alias being removed.
+        if (na->nick.equals_ci(na->nc->display))
+            return;
+        Log(LOG_COMMAND) << "[api_auth]: webhook UNGROUP " << na->nick << " -> " << na->nc->display;
+        SendGroupWebhook("UNGROUP", na->nc->display, na->nick);
     }
 };
 
