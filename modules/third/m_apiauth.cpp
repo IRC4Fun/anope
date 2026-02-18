@@ -38,6 +38,8 @@ under the terms of the GNU General Public License.
 
 #include <memory>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -1972,6 +1974,112 @@ class ModuleAPIAuth final : public Module {
     std::unique_ptr<Scram256VerifierServiceImpl> scram256_service;
 
     ApiAuthVerifierDataType verifier_type;
+
+    size_t ImportVerifiersFromJson(const json &root)
+    {
+        const auto dit = root.find("data");
+        if (dit == root.end() || !dit->is_object())
+            return 0;
+
+        const auto vit = dit->find(APIAUTH_VERIFIER_DATA_TYPE);
+        if (vit == dit->end() || !vit->is_array())
+            return 0;
+
+        size_t imported = 0;
+        for (const auto &item : *vit)
+        {
+            if (!item.is_object())
+                continue;
+
+            const auto account_it = item.find("account");
+            if (account_it == item.end() || !account_it->is_string())
+                continue;
+
+            const Anope::string account = account_it->get<std::string>();
+            if (account.empty())
+                continue;
+
+            auto *entry = ApiAuthVerifierEntry::FindOrCreate(account);
+
+            const auto sha512_it = item.find("scram_sha512_verifier");
+            if (sha512_it != item.end() && sha512_it->is_string())
+                entry->scram_sha512_verifier = sha512_it->get<std::string>();
+
+            const auto sha256_it = item.find("scram_sha256_verifier");
+            if (sha256_it != item.end() && sha256_it->is_string())
+                entry->scram_sha256_verifier = sha256_it->get<std::string>();
+
+            ++imported;
+        }
+
+        return imported;
+    }
+
+    size_t LoadVerifiersFromFile(const std::string &path)
+    {
+        std::ifstream in(path);
+        if (!in.is_open())
+            return 0;
+
+        try
+        {
+            json root;
+            in >> root;
+            return ImportVerifiersFromJson(root);
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    void RecoverVerifierCacheIfEmpty()
+    {
+        if (!ApiAuthVerifierList->empty())
+            return;
+
+        size_t imported = LoadVerifiersFromFile("data/m_apiauth.module.json");
+        if (imported > 0)
+        {
+            Log(LOG_NORMAL) << "[api_auth]: Recovered " << imported
+                            << " verifier record(s) from data/m_apiauth.module.json";
+            return;
+        }
+
+        std::vector<std::filesystem::path> backups;
+        const std::filesystem::path backup_dir("data/backups");
+
+        try
+        {
+            if (std::filesystem::exists(backup_dir) && std::filesystem::is_directory(backup_dir))
+            {
+                for (const auto &entry : std::filesystem::directory_iterator(backup_dir))
+                {
+                    if (!entry.is_regular_file())
+                        continue;
+
+                    const auto name = entry.path().filename().string();
+                    if (name.rfind("m_apiauth.module.json.", 0) == 0)
+                        backups.push_back(entry.path());
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+
+        std::sort(backups.begin(), backups.end(), std::greater<std::filesystem::path>());
+        for (const auto &backup : backups)
+        {
+            imported = LoadVerifiersFromFile(backup.string());
+            if (imported > 0)
+            {
+                Log(LOG_NORMAL) << "[api_auth]: Recovered " << imported
+                                << " verifier record(s) from backup " << backup.string();
+                return;
+            }
+        }
+    }
 public:
     ModuleAPIAuth(const Anope::string &modname, const Anope::string &creator)
         : Module(modname, creator, EXTRA | VENDOR)
@@ -2073,6 +2181,8 @@ public:
             this->scram256_mech.reset();
             BroadcastSaslMechsIfSynced();
         }
+
+        RecoverVerifierCacheIfEmpty();
 
         Log(LOG_COMMAND) << "[api_auth]: Loaded " << ApiAuthVerifierList->size()
                          << " persisted SCRAM verifier record(s) from database";
