@@ -15,7 +15,6 @@
 /// END CMAKE
 
 #include "module.h"
-#include <jwt-cpp/jwt.h>
 #include <openssl/evp.h>
 
 #if defined(__has_include)
