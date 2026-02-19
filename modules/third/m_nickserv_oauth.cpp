@@ -17,15 +17,17 @@
 #include "module.h"
 #include <openssl/evp.h>
 
-#if defined(__has_include)
-# if __has_include(<jwt-cpp/jwt.h>)
-#  include <jwt-cpp/jwt.h>
-#  define NSOAUTH_HAS_JWTCPP 1
-# else
-#  define NSOAUTH_HAS_JWTCPP 0
-# endif
-#else
+// JWT support is disabled by default to allow compilation without jwt-cpp.
+// To enable OAuth/JWT functionality, uncomment the next line and ensure
+// jwt-cpp headers are available in your include path.
+// #define NSOAUTH_HAS_JWTCPP 1
+
+#ifndef NSOAUTH_HAS_JWTCPP
 # define NSOAUTH_HAS_JWTCPP 0
+#endif
+
+#if NSOAUTH_HAS_JWTCPP
+# include <jwt-cpp/jwt.h>
 #endif
 
 
@@ -86,6 +88,7 @@ public:
         }
 
         // Validate JWT token
+#if NSOAUTH_HAS_JWTCPP
         try
         {
             std::string token_str(token.c_str());
@@ -227,6 +230,12 @@ public:
                              << "\002: " << e.what();
             u->BadPassword();
         }
+#else
+        // jwt-cpp is not available at compile time
+        source.Reply(_("OAuth authentication is not available (server not compiled with JWT support)."));
+        Log(me, "oauth") << u->GetMask() << " tried to use IDENTIFYOAUTH but JWT support is not compiled in";
+        u->BadPassword();
+#endif
     }
 
     bool OnHelp(CommandSource &source, const Anope::string &subcommand) override
