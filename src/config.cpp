@@ -385,7 +385,8 @@ Conf::Conf() : Block("")
 			auto *memb = c->FindUser(bi);
 			if (memb != NULL)
 			{
-				for (auto mode : memb->status.Modes())
+				std::vector<ChannelMode *> existing_modes(memb->status.Modes().begin(), memb->status.Modes().end());
+				for (auto *mode : existing_modes)
 					c->RemoveMode(bi, mode, bi->GetUID());
 			}
 			/* Set the new modes */

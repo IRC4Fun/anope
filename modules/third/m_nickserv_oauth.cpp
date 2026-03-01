@@ -17,13 +17,16 @@
 #include "module.h"
 #include <openssl/evp.h>
 
-// JWT support is disabled by default to allow compilation without jwt-cpp.
-// To enable OAuth/JWT functionality, uncomment the next line and ensure
-// jwt-cpp headers are available in your include path.
-// #define NSOAUTH_HAS_JWTCPP 1
-
 #ifndef NSOAUTH_HAS_JWTCPP
-# define NSOAUTH_HAS_JWTCPP 0
+# if defined(__has_include)
+#  if __has_include(<jwt-cpp/jwt.h>)
+#   define NSOAUTH_HAS_JWTCPP 1
+#  else
+#   define NSOAUTH_HAS_JWTCPP 0
+#  endif
+# else
+#  define NSOAUTH_HAS_JWTCPP 0
+# endif
 #endif
 
 #if NSOAUTH_HAS_JWTCPP

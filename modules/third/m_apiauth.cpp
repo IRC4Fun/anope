@@ -638,7 +638,7 @@ static constexpr const char *APIAUTH_VERIFIER_DATA_TYPE = "ApiAuthVerifier";
 
 class ApiAuthVerifierEntry;
 using apiauth_verifier_map = Anope::unordered_map<ApiAuthVerifierEntry *>;
-static Serialize::Checker<apiauth_verifier_map> ApiAuthVerifierList(APIAUTH_VERIFIER_DATA_TYPE);
+static apiauth_verifier_map ApiAuthVerifierList;
 
 class ApiAuthVerifierEntry final
     : public Serializable
@@ -652,14 +652,14 @@ public:
         : Serializable(APIAUTH_VERIFIER_DATA_TYPE)
         , account(acct)
     {
-        ApiAuthVerifierList->insert_or_assign(acct, this);
+        ApiAuthVerifierList.insert_or_assign(acct, this);
     }
 
     ~ApiAuthVerifierEntry() override
     {
-        auto it = ApiAuthVerifierList->find(this->account);
-        if (it != ApiAuthVerifierList->end() && it->second == this)
-            ApiAuthVerifierList->erase(it);
+        auto it = ApiAuthVerifierList.find(this->account);
+        if (it != ApiAuthVerifierList.end() && it->second == this)
+            ApiAuthVerifierList.erase(it);
     }
 
     void SetAccount(const Anope::string &acct)
@@ -670,18 +670,18 @@ public:
             return;
         }
 
-        auto old = ApiAuthVerifierList->find(this->account);
-        if (old != ApiAuthVerifierList->end() && old->second == this)
-            ApiAuthVerifierList->erase(old);
+        auto old = ApiAuthVerifierList.find(this->account);
+        if (old != ApiAuthVerifierList.end() && old->second == this)
+            ApiAuthVerifierList.erase(old);
 
         this->account = acct;
-        ApiAuthVerifierList->insert_or_assign(this->account, this);
+        ApiAuthVerifierList.insert_or_assign(this->account, this);
     }
 
     static ApiAuthVerifierEntry *Find(const Anope::string &acct)
     {
-        auto it = ApiAuthVerifierList->find(acct);
-        if (it != ApiAuthVerifierList->end())
+        auto it = ApiAuthVerifierList.find(acct);
+        if (it != ApiAuthVerifierList.end())
             return it->second;
         return nullptr;
     }
@@ -2035,7 +2035,7 @@ class ModuleAPIAuth final : public Module {
 
     void RecoverVerifierCacheIfEmpty()
     {
-        if (!ApiAuthVerifierList->empty())
+        if (!ApiAuthVerifierList.empty())
             return;
 
         size_t imported = LoadVerifiersFromFile("data/m_apiauth.module.json");
@@ -2184,7 +2184,7 @@ public:
 
         RecoverVerifierCacheIfEmpty();
 
-        Log(LOG_COMMAND) << "[api_auth]: Loaded " << ApiAuthVerifierList->size()
+        Log(LOG_COMMAND) << "[api_auth]: Loaded " << ApiAuthVerifierList.size()
                          << " persisted SCRAM verifier record(s) from database";
     }
 

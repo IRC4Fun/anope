@@ -281,7 +281,7 @@ public:
 		if (auto* cur = this->item.Get(ci))
 			only = cur->group_only;
 		else
-			only = true; // default to enforcement when a group is set
+			only = this->gs.GetDefaultGroupOnly(); // configurable default for new GROUP associations
 
 		this->item.Set(ci, GSChanAccessData(ci, val, only));
 		Log(source.AccessFor(ci).HasPriv("SET") ? LOG_COMMAND : LOG_OVERRIDE, source, this, ci) << "to set GROUP to " << val;
