@@ -1,14 +1,81 @@
 # Anope Change Log
 
-## Anope 2.1.22 (unreleased)
+## Anope 2.1.22 (2026-03-01)
 
 ### Breaking Changes
+
+* Automatic login using a known SSL fingerprint now requires the `AUTOLOGIN` option to be set on accounts with `/NS SET AUTOLOGIN ON`. Automatic login is largely obsolete now SASL EXTERNAL exists and is widely supported.
 
 * Conan 2 is now used for packaging dependencies on Windows. If you are building from source you will need to upgrade Conan.
 
 * Non-breaking spaces in translatable messages now use 0x1B instead of 0x1A due to recent msgfmt releases treating 0x1A as an EOF character. If you have an out of tree translation you will need to update it.
 
-## Changes
+* User TLS certificates are now stored in their own `NSCert` table instead of as a column in the `NickCore` table. If you are reading this information you will need to update your code.
+
+### Changes
+
+* Fixed `{botserv}:botmodes` erroneously allowing setting non-status modes on channels.
+
+* Fixed echoing message tags on Solanum.
+
+* Fixed handling incoming `FIDENT` messages on InspIRCd.
+
+* Fixed matching stacked extended bans on InspIRCd and UnrealIRCd.
+
+* Fixed parameter modes in `chanserv/mode` locks erroneously requiring a parameter to unset a lock.
+
+* Fixed restoring the object identifier when unserialising objects in db_json.
+
+* Fixed the consistency of indenting and line wrapping command examples in help output.
+
+* Redesigned the output of `nickserv/list` to show more relevant information.
+
+  ```
+  /NICKSERV LIST *
+  -NickServ- List of entries matching *:
+  -NickServ- alice (account: alice)
+  -NickServ- alice|work (account: alice)
+  -NickServ- bob -- Unconfirmed (account: bob)
+  -NickServ- mallory -- Suspended (account: mallory)
+  -NickServ- End of list - 4/4 matches shown.
+  ```
+
+* The cs_set_misc and ns_set_misc modules now can use a separate title from the command name.
+
+  ```
+  /NICKSERV SET MASTODON @example@mastodon.social
+  -NickServ- Mastodon for testuser set to @example@mastodon.social
+  ```
+
+* The cs_set_misc and ns_set_misc modules now support validation of user-specified data.
+
+  ```
+  /NICKSERV SET MASTODON example.mastodon.social
+  -NickServ- Mastodon syntax is invalid.
+  -NickServ- Syntax: SET MASTODON [@user@host.tld]
+  ```
+
+* The db_atheme module can now import arbitrary metadata to fields from the ns_set_misc module.
+
+* The local clock will now be checked for synchronisation with the IRCd clock on UnrealIRCd.
+
+* The `nickserv/cert` command will now show the time a TLS certificate was created and the nickname of the creator if the `VIEW` subcommand is used.
+
+  ```
+  /NICKSERV CERT VIEW
+  -NickServ- d41d8cd98f00b204e9800998ecf8427e -- created by nick1 at Wed 25 Feb 00:18:50 GMT
+  ```
+
+* The ns_set_misc module can now add account data to the WHOIS output of authenticated users on InspIRCd (with the swhois_ext module) and UnrealIRCd.
+
+  ```
+  /WHOIS nick1
+  * [nick1] (nick1@example.com): nick1
+  * [nick1] Mastodon: @example@mastodon.social
+  * [nick1] irc.example.com :Example-IRC server
+  ...
+  * [nick1] End of WHOIS list.
+  ```
 
 * The regex_posix module is now available on Windows (using the PCRE2 POSIX compatibility layer).
 
