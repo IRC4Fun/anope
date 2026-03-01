@@ -54,6 +54,9 @@ public:
     {
         const Anope::string &username = params[0];
         const Anope::string &token = params[1];
+#if !NSOAUTH_HAS_JWTCPP
+        (void)token;
+#endif
 
         User *u = source.GetUser();
         BotInfo *bi = Config->GetClient("NickServ");
