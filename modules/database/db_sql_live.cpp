@@ -104,6 +104,12 @@ public:
 		{
 			if (obj && this->SQL)
 			{
+				if (!obj->ShouldCommit())
+				{
+					OnSerializableDestruct(obj);
+					continue; // Non-committable object.
+				}
+
 				Serialize::Type *s_type = obj->GetSerializableType();
 				if (!s_type)
 					continue;
@@ -152,7 +158,7 @@ public:
 		const auto &block = conf.GetModule(this);
 
 		this->SQL.SetServiceName(block.Get<const Anope::string>("engine"));
-		this->prefix = block.Get<const Anope::string>("prefix", "anope_db_");
+		this->prefix = block.Get<const Anope::string>("prefix", "anope21_");
 	}
 
 	void OnSerializableConstruct(Serializable *obj) override
@@ -220,7 +226,7 @@ public:
 				Data data;
 
 				for (const auto &[key, value] : row)
-					data[key] << value;
+					data.StoreInternal(key, value);
 
 				Serializable *s = NULL;
 				auto it = obj->objects.find(id);

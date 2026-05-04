@@ -41,7 +41,7 @@ struct SeenInfo final
 
 	~SeenInfo() override
 	{
-		database_map::iterator iter = database.find(nick);
+		auto iter = database.find(nick);
 		if (iter != database.end() && iter->second == this)
 			database.erase(iter);
 	}
@@ -111,9 +111,7 @@ struct SeenInfoType final
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		Anope::string snick;
-
-		data["nick"] >> snick;
+		const auto snick = data.Load("nick");
 
 		SeenInfo *s;
 		if (obj)
@@ -127,14 +125,12 @@ struct SeenInfoType final
 		}
 
 		s->nick = snick;
-		data["vhost"] >> s->vhost;
-		Anope::string n;
-		data["type"] >> n;
-		s->type = StringToType(n);
-		data["nick2"] >> s->nick2;
-		data["channel"] >> s->channel;
-		data["message"] >> s->message;
-		data["last"] >> s->last;
+		s->vhost = data.Load("vhost");
+		s->type = StringToType(data.Load("type"));
+		s->nick2 = data.Load("nick2");
+		s->channel = data.Load("channel");
+		s->message = data.Load("message");
+		s->last = data.Load<time_t>("last");
 
 		if (!obj)
 			database[s->nick] = s;
@@ -144,7 +140,7 @@ struct SeenInfoType final
 
 static SeenInfo *FindInfo(const Anope::string &nick)
 {
-	database_map::iterator iter = database.find(nick);
+	auto iter = database.find(nick);
 	if (iter != database.end())
 		return iter->second;
 	return NULL;
@@ -203,7 +199,7 @@ public:
 			time = Anope::CurTime - time;
 			database_map::iterator buf;
 			size_t counter = 0;
-			for (database_map::iterator it = database.begin(), it_end = database.end(); it != it_end;)
+			for (auto it = database.begin(), it_end = database.end(); it != it_end;)
 			{
 				buf = it;
 				++it;
@@ -285,7 +281,7 @@ public:
 		if (u2)
 			onlinestatus = ".";
 		else
-			onlinestatus = Anope::Format(Language::Translate(source.nc, _(" but %s mysteriously dematerialized.")), target.c_str());
+			onlinestatus = Anope::Format(source.Translate(_(" but %s mysteriously dematerialized.")), target.c_str());
 
 		Anope::string timebuf = Anope::Duration(Anope::CurTime - info->last, source.nc);
 		Anope::string timebuf2 = Anope::strftime(info->last, source.nc, true);
@@ -299,9 +295,9 @@ public:
 		{
 			u2 = User::Find(info->nick2, true);
 			if (u2)
-				onlinestatus = Anope::Format(Language::Translate(source.nc, _(". %s is still online.")), u2->nick.c_str());
+				onlinestatus = Anope::Format(source.Translate(_(". %s is still online.")), u2->nick.c_str());
 			else
-				onlinestatus = Anope::Format(Language::Translate(source.nc, _(", but %s mysteriously dematerialized.")), info->nick2.c_str());
+				onlinestatus = Anope::Format(source.Translate(_(", but %s mysteriously dematerialized.")), info->nick2.c_str());
 
 			source.Reply(_("%s (%s) was last seen changing nick to %s %s ago%s"),
 				target.c_str(), info->vhost.c_str(), info->nick2.c_str(), timebuf.c_str(), onlinestatus.c_str());
@@ -379,9 +375,9 @@ public:
 			return;
 
 		auto previous_size = database.size();
-		for (database_map::iterator it = database.begin(), it_end = database.end(); it != it_end;)
+		for (auto it = database.begin(), it_end = database.end(); it != it_end;)
 		{
-			database_map::iterator cur = it;
+			auto cur = it;
 			++it;
 
 			if ((Anope::CurTime - cur->second->last) > purgetime)

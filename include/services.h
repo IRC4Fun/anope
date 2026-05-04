@@ -27,7 +27,7 @@
 #include <exception>
 #include <fstream>
 #include <functional>
-#include <iostream>
+#include <istream>
 #include <list>
 #include <map>
 #include <set>
@@ -40,8 +40,6 @@
 
 #include "defs.h"
 #include "sysconf.h"
-
-#define BUFSIZE 1024
 
 #define _(x) x
 #define N_(x, y) x, y

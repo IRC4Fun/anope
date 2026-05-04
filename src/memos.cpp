@@ -31,7 +31,7 @@ Memo::~Memo()
 {
 	if (mi)
 	{
-		std::vector<Memo *>::iterator it = std::find(mi->memos->begin(), mi->memos->end(), this);
+		auto it = std::find(mi->memos->begin(), mi->memos->end(), this);
 
 		if (it != mi->memos->end())
 			mi->memos->erase(it);
@@ -56,9 +56,7 @@ void Memo::Type::Serialize(Serializable *obj, Serialize::Data &data) const
 
 Serializable *Memo::Type::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string owner;
-
-	data["owner"] >> owner;
+	const auto owner = data.Load("owner");
 
 	bool ischan;
 	MemoInfo *mi = MemoInfo::GetMemoInfo(owner, ischan);
@@ -75,11 +73,11 @@ Serializable *Memo::Type::Unserialize(Serializable *obj, Serialize::Data &data) 
 	}
 
 	m->owner = owner;
-	data["time"] >> m->time;
-	data["sender"] >> m->sender;
-	data["text"] >> m->text;
-	data["unread"] >> m->unread;
-	data["receipt"] >> m->receipt;
+	m->time = data.Load<time_t>("time");
+	m->sender = data.Load("sender");
+	m->text = data.Load("text");
+	m->unread = data.Load<bool>("unread");
+	m->receipt = data.Load<bool>("receipt");
 
 	if (obj == NULL)
 		mi->memos->push_back(m);
@@ -115,7 +113,7 @@ void MemoInfo::Del(unsigned index)
 
 	Memo *m = this->GetMemo(index);
 
-	std::vector<Memo *>::iterator it = std::find(memos->begin(), memos->end(), m);
+	auto it = std::find(memos->begin(), memos->end(), m);
 	if (it != memos->end())
 		memos->erase(it);
 

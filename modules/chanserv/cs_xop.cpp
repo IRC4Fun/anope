@@ -32,7 +32,7 @@ public:
 
 	bool HasPriv(const Anope::string &priv) const override
 	{
-		for (std::vector<Anope::string>::iterator it = std::find(order.begin(), order.end(), this->type); it != order.end(); ++it)
+		for (auto it = std::find(order.begin(), order.end(), this->type); it != order.end(); ++it)
 		{
 			const std::vector<Anope::string> &privs = permissions[*it];
 			if (std::find(privs.begin(), privs.end(), priv) != privs.end())
@@ -55,7 +55,7 @@ public:
 	{
 		if (access->provider->name == "access/xop")
 		{
-			const XOPChanAccess *xaccess = anope_dynamic_static_cast<const XOPChanAccess *>(access);
+			const auto *xaccess = anope_dynamic_static_cast<const XOPChanAccess *>(access);
 			return xaccess->type;
 		}
 		else
@@ -128,7 +128,7 @@ private:
 		bool override = false;
 		const NickAlias *na = NULL;
 
-		std::vector<Anope::string>::iterator cmd_it = std::find(order.begin(), order.end(), source.command.upper()),
+		auto cmd_it = std::find(order.begin(), order.end(), source.command.upper()),
 			access_it = highest ? std::find(order.begin(), order.end(), XOPChanAccess::DetermineLevel(highest)) : order.end();
 
 		if (!access.founder && (!access.HasPriv("ACCESS_CHANGE") || cmd_it <= access_it))
@@ -252,7 +252,7 @@ private:
 		ServiceReference<AccessProvider> provider("AccessProvider", "access/xop");
 		if (!provider)
 			return;
-		XOPChanAccess *acc = anope_dynamic_static_cast<XOPChanAccess *>(provider->Create());
+		auto *acc = anope_dynamic_static_cast<XOPChanAccess *>(provider->Create());
 		acc->SetMask(mask, ci);
 		acc->creator = source.GetNick();
 		acc->description = description;
@@ -263,7 +263,7 @@ private:
 
 		Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to add " << mask;
 
-		FOREACH_MOD(OnAccessAdd, (ci, source, acc));
+		FOREACH_MOD(OnAccessAdd, (ci, source, acc, false));
 		source.Reply(_("\002%s\002 added to %s %s list."), acc->Mask().c_str(), ci->name.c_str(), source.command.nobreak().c_str());
 	}
 
@@ -311,7 +311,7 @@ private:
 			}
 		}
 
-		std::vector<Anope::string>::iterator cmd_it = std::find(order.begin(), order.end(), source.command.upper()),
+		auto cmd_it = std::find(order.begin(), order.end(), source.command.upper()),
 			access_it = highest ? std::find(order.begin(), order.end(), XOPChanAccess::DetermineLevel(highest)) : order.end();
 
 		if (!mask.equals_ci(nc->display) && !access.founder && (!access.HasPriv("ACCESS_CHANGE") || cmd_it <= access_it))
@@ -372,7 +372,7 @@ private:
 					nicks += caccess->Mask();
 
 					ci->EraseAccess(number - 1);
-					FOREACH_MOD(OnAccessDel, (ci, source, caccess));
+					FOREACH_MOD(OnAccessDel, (ci, source, caccess, false));
 					delete caccess;
 				}
 			}
@@ -395,7 +395,7 @@ private:
 					source.Reply(_("\002%s\002 deleted from %s %s list."), a->Mask().c_str(), ci->name.c_str(), source.command.nobreak().c_str());
 
 					ci->EraseAccess(i);
-					FOREACH_MOD(OnAccessDel, (ci, source, a));
+					FOREACH_MOD(OnAccessDel, (ci, source, a, false));
 					delete a;
 
 					return;
@@ -543,7 +543,7 @@ public:
 
 	Anope::string GetDesc(CommandSource &source) const override
 	{
-		return Anope::Format(Language::Translate(source.GetAccount(), _("Modify the list of %s users")), source.command.nobreak().c_str());
+		return Anope::Format(source.Translate(_("Modify the list of %s users")), source.command.nobreak().c_str());
 	}
 
 	void Execute(CommandSource &source, const std::vector<Anope::string> &params) override
@@ -636,8 +636,8 @@ public:
 
 		BotInfo *access_bi, *flags_bi;
 		Anope::string access_cmd, flags_cmd;
-		Command::FindCommandFromService("chanserv/access", access_bi, access_cmd);
-		Command::FindCommandFromService("chanserv/flags", flags_bi, flags_cmd);
+		Command::FindFromService("chanserv/access", access_bi, access_cmd);
+		Command::FindFromService("chanserv/flags", flags_bi, flags_cmd);
 		if (!access_cmd.empty() || !flags_cmd.empty())
 		{
 			source.Reply(_("Alternative methods of modifying channel access lists are available."));

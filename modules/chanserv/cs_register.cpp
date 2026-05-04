@@ -28,7 +28,7 @@ public:
 	{
 		const Anope::string &chan = params[0];
 		const Anope::string &chdesc = params.size() > 1 ? params[1] : "";
-		unsigned maxregistered = Config->GetModule("chanserv").Get<unsigned>("maxregistered");
+		auto maxregistered = Config->GetModule("chanserv").Get<unsigned>("maxregistered");
 
 		User *u = source.GetUser();
 		NickCore *nc = source.nc;
@@ -105,7 +105,7 @@ public:
 
 		BotInfo *bi;
 		Anope::string cmd;
-		if (Command::FindCommandFromService("chanserv/access", bi, cmd))
+		if (Command::FindFromService("chanserv/access", bi, cmd))
 		{
 			source.Reply(" ");
 			source.Reply(_(

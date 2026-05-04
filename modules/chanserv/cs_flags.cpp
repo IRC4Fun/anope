@@ -28,7 +28,7 @@ public:
 
 	bool HasPriv(const Anope::string &priv) const override
 	{
-		std::map<Anope::string, char>::iterator it = defaultFlags.find(priv);
+		auto it = defaultFlags.find(priv);
 		return it != defaultFlags.end() && this->flags.count(it->second) > 0;
 	}
 
@@ -286,7 +286,7 @@ class CommandCSFlags final
 			if (current != NULL)
 			{
 				ci->EraseAccess(current_idx - 1);
-				FOREACH_MOD(OnAccessDel, (ci, source, current));
+				FOREACH_MOD(OnAccessDel, (ci, source, current, false));
 				delete current;
 				Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to delete " << mask;
 				source.Reply(_("\002%s\002 removed from the %s access list."), mask.c_str(), ci->name.c_str());
@@ -301,7 +301,7 @@ class CommandCSFlags final
 		ServiceReference<AccessProvider> provider("AccessProvider", "access/flags");
 		if (!provider)
 			return;
-		FlagsChanAccess *access = anope_dynamic_static_cast<FlagsChanAccess *>(provider->Create());
+		auto *access = anope_dynamic_static_cast<FlagsChanAccess *>(provider->Create());
 		access->SetMask(mask, ci);
 			access->creator = source.GetNick();
 		access->description = current ? current->description : description;
@@ -314,7 +314,7 @@ class CommandCSFlags final
 
 		ci->AddAccess(access);
 
-		FOREACH_MOD(OnAccessAdd, (ci, source, access));
+		FOREACH_MOD(OnAccessAdd, (ci, source, access, false));
 
 		Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to modify " << mask << "'s flags to " << access->AccessSerialize();
 		if (p != NULL)
@@ -331,6 +331,7 @@ class CommandCSFlags final
 	static void DoList(CommandSource &source, ChannelInfo *ci, const std::vector<Anope::string> &params)
 	{
 		const Anope::string &arg = params.size() > 2 ? params[2] : "";
+		const auto show_all = params.size() > 3 && params[3].equals_ci("ALL");
 
 		if (!ci->GetAccessCount())
 		{
@@ -348,6 +349,7 @@ class CommandCSFlags final
 		});
 
 		unsigned count = 0;
+		unsigned foreign = 0;
 		for (unsigned i = 0, end = ci->GetAccessCount(); i < end; ++i)
 		{
 			const ChanAccess *access = ci->GetAccess(i);
@@ -366,6 +368,12 @@ class CommandCSFlags final
 				}
 				else if (!Anope::Match(access->Mask(), arg))
 					continue;
+			}
+
+			if (!show_all && access->provider->name != "access/flags")
+			{
+				foreign++;
+				continue;
 			}
 
 			ListFormatter::ListEntry entry;
@@ -390,6 +398,88 @@ class CommandCSFlags final
 			else
 				source.Reply(_("End of access list - %d/%d entries shown."), count, ci->GetAccessCount());
 		}
+
+		if (foreign)
+		{
+			const auto full_command = Anope::Format("%s %s LIST %s", source.command.c_str(),
+				ci->name.c_str(), arg.empty() ? "*" : arg.c_str()).nobreak();
+
+			source.Reply(foreign, CHAN_ACCESS_FOREIGN, foreign, full_command.c_str());
+		}
+	}
+
+	void DoMigrate(CommandSource &source, ChannelInfo *ci, const std::vector<Anope::string> &params)
+	{
+		auto override = false;
+		const auto source_access = source.AccessFor(ci);
+
+		unsigned migrated = 0, notmigrated = 0;
+		Anope::string migratedmask, notmigratedmask;
+		const auto &entry = params.size() > 2 ? params[2] : "*";
+		for (auto idx = ci->GetAccessCount(); idx > 0; --idx)
+		{
+			auto *access = ci->GetAccess(idx - 1);
+			if (access->provider->name == "access/flags")
+				continue; // Already using flags.
+
+			if (!Anope::Match(access->Mask(), entry))
+				continue; // Not this entry.
+
+			std::set<char> newflags;
+			for (auto &[priv, flag] : defaultFlags)
+			{
+				if (access->HasPriv(priv))
+					continue; // Source doesn't have this flag.
+
+				// Check that the source has access to set this entry.
+				if (!override && !source_access.HasPriv(priv) && !source_access.founder)
+				{
+					if (!source.HasPriv("chanserv/access/modify"))
+					{
+						notmigrated++;
+						notmigratedmask = access->Mask();
+						continue; // No privs
+					}
+
+					override = true;
+				}
+
+				newflags.insert(flag);
+			}
+
+			migrated++;
+			migratedmask = access->Mask();
+
+			auto *newaccess = anope_dynamic_static_cast<FlagsChanAccess *>(FlagsAccessProvider::ap->Create());
+			newaccess->SetMask(access->Mask(), ci);
+			newaccess->creator = access->creator;
+			newaccess->description = access->description;
+			newaccess->created = access->created;
+			newaccess->flags = newflags;
+
+			ci->EraseAccess(idx - 1);
+			FOREACH_MOD(OnAccessDel, (ci, source, access, true));
+			delete access;
+
+			ci->AddAccess(newaccess);
+			FOREACH_MOD(OnAccessAdd, (ci, source, newaccess, true));
+		}
+
+		if (migrated == 1)
+		{
+			Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to migrate " << migratedmask;
+			source.Reply(CHAN_ACCESS_MIGRATED_1, migratedmask.c_str(), source.command.nobreak().c_str());
+		}
+		else if (migrated > 1)
+		{
+			Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to migrate " << migrated << " access entries";
+			source.Reply(migrated, CHAN_ACCESS_MIGRATED_N, migrated, source.command.nobreak().c_str());
+		}
+
+		if (notmigrated == 1)
+			source.Reply(CHAN_ACCESS_NOT_MIGRATED_1, notmigratedmask.c_str(), source.command.nobreak().c_str());
+		else if (notmigrated > 1)
+			source.Reply(migrated, CHAN_ACCESS_NOT_MIGRATED_N, notmigrated, source.command.nobreak().c_str());
 	}
 
 	void DoClear(CommandSource &source, ChannelInfo *ci)
@@ -414,7 +504,8 @@ public:
 	{
 		this->SetDesc(_("Modify the list of privileged users"));
 		this->SetSyntax(_("\037channel\037 [MODIFY] \037mask\037 \037changes\037 [\037description\037]"));
-		this->SetSyntax(_("\037channel\037 LIST [\037mask\037 | +\037flags\037]"));
+		this->SetSyntax(_("\037channel\037 LIST [\037mask\037 | +\037flags\037] [ALL]"));
+		this->SetSyntax(_("\037channel\037 MIGRATE [\037mask\037]"));
 		this->SetSyntax(_("\037channel\037 CLEAR"));
 	}
 
@@ -447,6 +538,8 @@ public:
 			source.Reply(READ_ONLY_MODE);
 		else if (is_list)
 			this->DoList(source, ci, params);
+		else if (cmd.equals_ci("MIGRATE"))
+			this->DoMigrate(source, ci, params);
 		else if (cmd.equals_ci("CLEAR"))
 			this->DoClear(source, ci);
 		else
@@ -487,7 +580,8 @@ public:
 				"The \002LIST\002 command allows you to list existing entries on the channel access list. "
 				"If a mask is given, the mask is wildcard matched against all existing entries on the "
 				"access list, and only those entries are returned. If a set of flags is given, only those "
-				"on the access list with the specified flags are returned."
+				"on the access list with the specified flags are returned. The \002ALL\002 option allows "
+				"listing entries from other access systems as well as flags."
 				"\n\n"
 				"The \002CLEAR\002 command clears the channel access list. This requires channel founder access."
 				"\n\n"
@@ -505,7 +599,7 @@ public:
 			Privilege *p = PrivilegeManager::FindPrivilege(priv);
 			if (p == NULL)
 				continue;
-			source.Reply("  %c - %s", flag, Language::Translate(source.nc, p->desc.c_str()));
+			source.Reply("  %c - %s", flag, source.Translate(p->desc.c_str()));
 		}
 
 		return true;

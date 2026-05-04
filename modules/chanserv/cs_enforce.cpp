@@ -64,7 +64,7 @@ private:
 		for (auto *user : users)
 		{
 			Anope::string mask = ci->GetIdealBan(user);
-			Anope::string reason = Language::Translate(user, _("RESTRICTED enforced by ")) + source.GetNick();
+			Anope::string reason = Anope::Format(Language::Translate(user, _("RESTRICTED enforced by %s")), source.GetNick().c_str());
 			ci->c->SetMode(NULL, "BAN", mask);
 			ci->c->Kick(NULL, user, reason);
 		}
@@ -92,7 +92,7 @@ private:
 		for (auto *user : users)
 		{
 			Anope::string mask = ci->GetIdealBan(user);
-			Anope::string reason = Language::Translate(user, _("REGONLY enforced by ")) + source.GetNick();
+			Anope::string reason = Anope::Format(Language::Translate(user, _("REGONLY enforced by %s")), source.GetNick().c_str());
 			if (!ci->c->HasMode("REGISTEREDONLY"))
 				ci->c->SetMode(NULL, "BAN", mask);
 			ci->c->Kick(NULL, user, reason);
@@ -121,7 +121,7 @@ private:
 		for (auto *user : users)
 		{
 			Anope::string mask = ci->GetIdealBan(user);
-			Anope::string reason = Language::Translate(user, _("SSLONLY enforced by ")) + source.GetNick();
+			Anope::string reason = Anope::Format(Language::Translate(user, _("SSLONLY enforced by %s")), source.GetNick().c_str());
 			if (!ci->c->HasMode("SSL"))
 				ci->c->SetMode(NULL, "BAN", mask);
 			ci->c->Kick(NULL, user, reason);
@@ -149,7 +149,7 @@ private:
 
 		for (auto *user : users)
 		{
-			Anope::string reason = Language::Translate(user, _("BANS enforced by ")) + source.GetNick();
+			Anope::string reason = Anope::Format(Language::Translate(user, _("BANS enforced by %s")), source.GetNick().c_str());
 			ci->c->Kick(NULL, user, reason);
 		}
 
@@ -177,7 +177,7 @@ private:
 
 		std::vector<User *> users;
 		/* The newer users are at the end of the list, so kick users starting from the end */
-		for (Channel::ChanUserList::reverse_iterator it = ci->c->users.rbegin(), it_end = ci->c->users.rend(); it != it_end; ++it)
+		for (auto it = ci->c->users.rbegin(), it_end = ci->c->users.rend(); it != it_end; ++it)
 		{
 			auto *memb = it->second;
 			User *user = memb->user;
@@ -197,7 +197,7 @@ private:
 
 		for (auto *user : users)
 		{
-			Anope::string reason = Language::Translate(user, _("LIMIT enforced by ")) + source.GetNick();
+			Anope::string reason = Anope::Format(Language::Translate(user, _("LIMIT enforced by %s")), source.GetNick().c_str());
 			ci->c->Kick(NULL, user, reason);
 		}
 

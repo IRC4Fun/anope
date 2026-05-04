@@ -105,7 +105,7 @@ void NumberList::Process()
 
 	if (this->desc)
 	{
-		for (std::set<unsigned>::reverse_iterator it = numbers.rbegin(), it_end = numbers.rend(); it != it_end; ++it)
+		for (auto it = numbers.rbegin(), it_end = numbers.rend(); it != it_end; ++it)
 			this->HandleNumber(*it);
 	}
 	else
@@ -272,7 +272,7 @@ void InfoFormatter::SendTo(CommandSource &source)
 		std::sort(this->options.begin(), this->options.end());
 
 		auto &optstr = (*this)[_("Options")];
-		for (const auto& option : this->options)
+		for (const auto &option : this->options)
 		{
 			if (!optstr.empty())
 				optstr += ", ";
@@ -340,8 +340,8 @@ void ExampleWrapper::SendTo(CommandSource &source)
 			header = false;
 		}
 
-		const auto *trans_example = Language::Translate(source.nc, entry.example.c_str());
-		const auto *trans_description = Language::Translate(source.nc, entry.description.c_str());
+		const auto *trans_example = source.Translate(entry.example);
+		const auto *trans_description = source.Translate(entry.description);
 		if (flexible)
 		{
 			source.Reply("\002%s%s%s\002: %s", source.command.c_str(), *trans_example ? " " : "",
@@ -381,13 +381,14 @@ void HelpWrapper::SendTo(CommandSource &source)
 
 	for (const auto &[entry_name, entry_desc] :  entries)
 	{
+		const auto *trans_desc = source.Translate(entry_desc);
 		if (flexible)
 		{
-			source.Reply("\002%s\002: %s", entry_name.c_str(), entry_desc.c_str());
+			source.Reply("\002%s\002: %s", entry_name.c_str(), trans_desc);
 		}
 		else
 		{
-			LineWrapper lw(Language::Translate(source.nc, entry_desc.c_str()), max_length);
+			LineWrapper lw(trans_desc, max_length);
 			Anope::string line;
 
 			Anope::string padding(longest - entry_name.utf8length(), ' ');
@@ -435,7 +436,7 @@ bool LineWrapper::GetLine(Anope::string &out)
 
 	auto toggle_formatting = [this, &uncertain_formatting](const Anope::string &fmt)
 	{
-		auto it = std::find_if(formatting.begin(), formatting.end(), [&fmt](const auto& f) {
+		auto it = std::find_if(formatting.begin(), formatting.end(), [&fmt](const auto &f) {
 			return f[0] == fmt[0];
 		});
 		if (it == formatting.end())
@@ -684,7 +685,7 @@ Anope::string Anope::strftime(time_t t, const NickCore *nc, bool short_output)
 		tzset();
 	}
 
-	char buf[BUFSIZE];
+	char buf[256];
 	strftime(buf, sizeof(buf), "%c", (nc ? localtime(&t) : gmtime(&t)));
 
 	if (nc)

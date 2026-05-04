@@ -15,11 +15,13 @@ fi
 find ../ \
 	! -path '../docs/*' \
 	-a ! -path '../modules/third/*' \
+	-a ! -path '../run/*' \
+	-a ! -path '../vendor/*' \
 	-a \( -name '*.cpp' \
 		-o -name '*.h' \
 		-o -name '*.conf' \
 	\) \
-	-exec \
+	-print0 | sort -z | xargs -0 -I {} \
 		xgettext \
 			--language=C++ \
 			--sort-output \
@@ -30,13 +32,13 @@ find ../ \
 			--keyword \
 			--keyword=_ \
 			--keyword=N_:1,2 \
-			{} +
+			{}
 
 for f in *.po
 do
 	echo "Merging $f"
 	msgmerge \
-		--no-location \
+		--add-location=file \
 		--no-wrap \
 		--sort-output \
 		--update \

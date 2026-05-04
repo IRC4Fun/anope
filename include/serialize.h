@@ -40,43 +40,11 @@ namespace Serialize
 		UINT,
 	};
 
-	class CoreExport Data
-	{
-	protected:
-		std::map<Anope::string, Serialize::DataType> types;
-
-	public:
-		virtual ~Data() = default;
-
-		virtual std::iostream &operator[](const Anope::string &key) = 0;
-
-		template <typename T>
-		void Store(const Anope::string &key, const T &value)
-		{
-			using Type = std::remove_cv_t<std::remove_reference_t<T>>;
-
-			if constexpr (std::is_same_v<Type, bool>)
-				SetType(key, DataType::BOOL);
-			else if constexpr (std::is_floating_point_v<Type>)
-				SetType(key, DataType::FLOAT);
-			else if constexpr (std::is_integral_v<Type> && std::is_signed_v<Type>)
-				SetType(key, DataType::INT);
-			else if constexpr (std::is_integral_v<Type> && std::is_unsigned_v<Type>)
-				SetType(key, DataType::UINT);
-
-			this->operator[](key) << value;
-		}
-
-		virtual size_t Hash() const { throw CoreException("Not supported"); }
-
-		Serialize::DataType GetType(const Anope::string &key) const;
-		void SetType(const Anope::string &key, Serialize::DataType dt);
-	};
-
 	extern void RegisterTypes();
 	extern void CheckTypes();
 	extern void CreateTypes();
 
+	class Data;
 	class Type;
 	template<typename T> class Checker;
 	template<typename T> class Reference;
@@ -106,12 +74,28 @@ private:
 	size_t last_commit = 0;
 	/* The last time this object was committed to the database */
 	time_t last_commit_time = 0;
+	/** Whether this object should be committed to the database. */
+	bool should_commit = true;
 
 protected:
 	Serializable(const Anope::string &serialize_type);
 	Serializable(const Serializable &);
 
 	Serializable &operator=(const Serializable &);
+
+	template<typename Container,
+		typename Key = typename Container::key_type,
+		typename Value = typename Container::mapped_type>
+	bool InsertUnique(Container &container, const Key &key)
+	{
+		auto res = container.emplace(key, static_cast<Value>(this));
+		if (res.second)
+			return true;
+
+		res.first->second->should_commit = false;
+		res.first->second = static_cast<Value>(this);
+		return false;
+	}
 
 public:
 	using Id = uint64_t;
@@ -120,12 +104,12 @@ public:
 	/* Unique ID (per type, not globally) for this object */
 	Id object_id = 0;
 
-	/* Only used by redis, to ignore updates */
-	unsigned short redis_ignore = 0;
-
 	/** Marks the object as potentially being updated "soon".
 	 */
 	void QueueUpdate();
+
+	/** Determines whether the object should be committed to the database. */
+	bool ShouldCommit() const { return this->should_commit; }
 
 	bool IsCached(Serialize::Data &);
 	void UpdateCache(Serialize::Data &);
@@ -137,8 +121,101 @@ public:
 	 * @return The serializable object type
 	 */
 	Serialize::Type *GetSerializableType() const { return this->s_type; }
+	const auto &GetSerializableName() const { return this->s_name; }
 
 	static const std::list<Serializable *> &GetItems();
+};
+
+class CoreExport Serialize::Data
+{
+protected:
+	/** The specified data types of known fields. */
+	std::map<Anope::string, Serialize::DataType> types;
+
+	Data() = default;
+
+	/** Internal method for loading data from the database.
+	 * @param key The field to get the value of.
+	 * @param value The location to store the retrieved value.
+	 */
+	virtual bool LoadInternal(const Anope::string &key, Anope::string &value) = 0;
+
+	/** Internal method for storing data in the database.
+	 * @param key The field to set the value of.
+	 * @param value The value of the field.
+	 */
+	virtual bool StoreInternal(const Anope::string &key, const Anope::string &value) = 0;
+
+	/** Sets the data type of the specified field. This is called automatically from \ref Store.
+	 * @param key The field to specify the data type for.
+	 * @param dt The data type of the field.
+	 */
+	void SetType(const Anope::string &key, Serialize::DataType dt);
+
+public:
+	virtual ~Data() = default;
+
+	/** Retrieves the data type for the specified field. If the field does not have a data type
+	 * specified then it will default to TEXT.
+	 * @param key The field to retrieve the data type for.
+	 */
+	Serialize::DataType GetType(const Anope::string &key) const;
+
+	/** Retrieves a unique hash for the data set. */
+	virtual size_t Hash() const { throw CoreException("Not supported"); }
+
+	/** Loads the value of a specific field.
+	 * @param key The field to get the value of.
+	 * @param def The default value if none is set.
+	 */
+	template <typename T = Anope::string>
+	T Load(const Anope::string &key, T def = T())
+	{
+		T out;
+		if (!TryLoad(key, out))
+			out = def;
+		return out;
+	}
+
+	/** Stores the value of a specific field, automatically setting its type.
+	 * @param key The field to set the value of.
+	 * @param value The value of the field.
+	 */
+	template <typename T>
+	void Store(const Anope::string &key, const T &value)
+	{
+		using Type = std::remove_cv_t<std::remove_reference_t<T>>;
+
+		if constexpr (std::is_same_v<Type, bool>)
+			SetType(key, DataType::BOOL);
+		else if constexpr (std::is_floating_point_v<Type>)
+			SetType(key, DataType::FLOAT);
+		else if constexpr (std::is_integral_v<Type> && std::is_signed_v<Type>)
+			SetType(key, DataType::INT);
+		else if constexpr (std::is_integral_v<Type> && std::is_unsigned_v<Type>)
+			SetType(key, DataType::UINT);
+
+		StoreInternal(key, Anope::ToString(value));
+	}
+
+	/** Tries to load the value of a specific field.
+	 * @param key The field to get the value of.
+	 * @param out The location to store the retrieved value.
+	 */
+	template <typename T = Anope::string>
+	bool TryLoad(const Anope::string &key, T &out)
+	{
+		Anope::string out_str;
+		if (!LoadInternal(key, out_str))
+			return false;
+
+		auto out_opt = Anope::TryConvert<T>(out_str);
+		if (!out_opt)
+			return false;
+
+		out = out_opt.value();
+		return true;
+	}
 };
 
 /* A serializable type. There should be a single instance of a subclass of this

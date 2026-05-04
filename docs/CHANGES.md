@@ -1,5 +1,57 @@
 # Anope Change Log
 
+## Anope 2.1.24 (unreleased)
+
+### Breaking Changes
+
+* If a database contains duplicate corrupt entries from a prior write failure the oldest ones will now be purged from the database. This is a destructive action so make sure you take a manual backup of your database before upgrading.
+
+* Removed support for storing the Anope database in Redis. The Redis code was extremely bitrotted, had not been tested in years, and to our knowledge has almost no (if any) users. It is recommended that db_redis users migrate to db_json or db_sql.
+
+* SQL tables now use versioned prefixes by default. For the SQL database backends the default is `anope21_` and for ChanStats the default is `chanstats21_`. If you do not have a prefix explicitly set in your config you will need to add one it. Alternatively, you may also want to consider exporting to db_json and re-importing to update your SQL schema for the recent database layout changes.
+
+### Changes
+
+* Added some helper methods to `CommandSource` to allow quickly translting messages.
+
+* Changed the Config script to allow multiple dashes in front of options, i.e. `-quick` and `--quick` are now equivalent.
+
+* Converted some language strings to use format strings instead of concatenation.
+
+* Fixed a rare crash in the ns_cert module.
+
+* Fixed building Anope as a unity build.
+
+* Fixed the ns_cert module erasing certificate entries if using an old database.
+
+* Fixed users having the wrong real name in log messages on InspIRCd if it has been previously changed with `CHGNAME` or `SETNAME`.
+
+## Anope 2.1.23 (2026-04-01)
+
+### Changes
+
+* Added examples to several BotServ commands.
+
+* Added missing fields to the `RPL_STATSLINKINFO` output.
+
+* Added support for migrating access entries between systems (currently only `chanserv/flags` is supported).
+
+* Added the default levels to the `chanserv/levels` DESC help.
+
+* Changed access listing commands to only show their own access entries unless `ALL` is specified.
+
+* Fixed a non-translatable string which has been marked as translatable.
+
+* Fixed the missing AUTOLOGIN extension.
+
+* Fixed translating the help output when the flexible layout is used.
+
+* Improved the accuracy of the X-line expiry time in `operserv/stats`.
+
+* Updated the Portuguese translation.
+
+* Updated the Romanian translation.
+
 ## Anope 2.1.22 (2026-03-01)
 
 ### Breaking Changes

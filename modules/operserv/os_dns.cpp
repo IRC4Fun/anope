@@ -38,7 +38,7 @@ struct DNSZone final
 
 	~DNSZone() override
 	{
-		std::vector<DNSZone *>::iterator it = std::find(zones->begin(), zones->end(), this);
+		auto it = std::find(zones->begin(), zones->end(), this);
 		if (it != zones->end())
 			zones->erase(it);
 	}
@@ -79,12 +79,12 @@ struct DNSZoneType final
 		DNSZone *zone;
 		Anope::string zone_name;
 
-		data["name"] >> zone_name;
+		zone_name = data.Load("name");
 
 		if (obj)
 		{
 			zone = anope_dynamic_static_cast<DNSZone *>(obj);
-			data["name"] >> zone->name;
+			zone->name = data.Load("name");
 		}
 		else
 			zone = new DNSZone(zone_name);
@@ -92,10 +92,10 @@ struct DNSZoneType final
 		zone->servers.clear();
 		for (unsigned count = 0; true; ++count)
 		{
-			Anope::string server_str;
-			data["server" + Anope::ToString(count)] >> server_str;
+			const auto server_str = data.Load(Anope::Format("server%u", count));
 			if (server_str.empty())
 				break;
+
 			zone->servers.insert(server_str);
 		}
 
@@ -127,7 +127,7 @@ public:
 
 	~DNSServer() override
 	{
-		std::vector<DNSServer *>::iterator it = std::find(dns_servers->begin(), dns_servers->end(), this);
+		auto it = std::find(dns_servers->begin(), dns_servers->end(), this);
 		if (it != dns_servers->end())
 			dns_servers->erase(it);
 	}
@@ -195,11 +195,9 @@ struct DNSServerType final
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
+		const auto server_name = data.Load("server_name");
+
 		DNSServer *req;
-		Anope::string server_name;
-
-		data["server_name"] >> server_name;
-
 		if (obj)
 		{
 			req = anope_dynamic_static_cast<DNSServer *>(obj);
@@ -210,23 +208,23 @@ struct DNSServerType final
 
 		for (unsigned i = 0; true; ++i)
 		{
-			Anope::string ip_str;
-			data["ip" + Anope::ToString(i)] >> ip_str;
+			const auto ip_str = data.Load(Anope::Format("ip%u", i));
 			if (ip_str.empty())
 				break;
+
 			req->ips.push_back(ip_str);
 		}
 
-		data["limit"] >> req->limit;
-		data["pooled"] >> req->pooled;
+		req->limit = data.Load<unsigned>("limit");
+		req->pooled = data.Load<bool>("pooled");
 
 		req->zones.clear();
 		for (unsigned i = 0; true; ++i)
 		{
-			Anope::string zone_str;
-			data["zone" + Anope::ToString(i)] >> zone_str;
+			const auto zone_str = data.Load(Anope::Format("zone%u", i));
 			if (zone_str.empty())
 				break;
+
 			req->zones.insert(zone_str);
 		}
 
@@ -255,7 +253,7 @@ class CommandOSDNS final
 
 			ListFormatter::ListEntry entry;
 			entry["Server"] = s->GetName();
-			entry["Limit"] = s->GetLimit() ? Anope::ToString(s->GetLimit()) : Language::Translate(source.GetAccount(), _("None"));
+			entry["Limit"] = s->GetLimit() ? Anope::ToString(s->GetLimit()) : source.Translate(_("None"));
 
 			Anope::string ip_str;
 			for (const auto &ip : s->GetIPs())
@@ -266,14 +264,14 @@ class CommandOSDNS final
 			entry["IP"] = ip_str;
 
 			if (s->Active())
-				entry["State"] = Language::Translate(source.GetAccount(), _("Pooled/Active"));
+				entry["State"] = source.Translate(_("Pooled/Active"));
 			else if (s->Pooled())
-				entry["State"] = Language::Translate(source.GetAccount(), _("Pooled/Not Active"));
+				entry["State"] = source.Translate(_("Pooled/Not Active"));
 			else
-				entry["State"] = Language::Translate(source.GetAccount(), _("Unpooled"));
+				entry["State"] = source.Translate(_("Unpooled"));
 
 			if (!srv)
-				entry["State"] += Anope::string(" ") + Language::Translate(source.GetAccount(), _("(Split)"));
+				entry["State"] += Anope::string(" ") + source.Translate(_("(Split)"));
 
 			lf.AddEntry(entry);
 		}

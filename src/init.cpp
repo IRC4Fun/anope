@@ -31,6 +31,8 @@
 #include <pwd.h>
 #include <sys/types.h>
 #endif
+
+#include <iostream>
 #include <thread>
 
 Anope::string Anope::ConfigDir = DEFAULT_CONF_DIR;
@@ -518,7 +520,7 @@ bool Anope::Init(int ac, char **av)
 
 	/* Create me */
 	const auto &block = Config->GetBlock("serverinfo");
-	Me = new Server(NULL, block.Get<const Anope::string>("name"), 0, block.Get<const Anope::string>("description"), block.Get<const Anope::string>("id"));
+	Me = new Server(NULL, block.Get<const Anope::string>("name"), block.Get<const Anope::string>("description"), block.Get<const Anope::string>("id"));
 	for (const auto &[_, bi] : *BotListByNick)
 	{
 		bi->server = Me;

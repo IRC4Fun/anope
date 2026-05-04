@@ -223,12 +223,12 @@ public:
 		else
 			ho = new HostOffer();
 
-		data["ident"] >> ho->ident;
-		data["host"] >> ho->host;
-		data["reason"] >> ho->reason;
-		data["creator"] >> ho->creator;
-		data["created"] >> ho->created;
-		data["expires"] >> ho->expires;
+		ho->ident = data.Load("ident");
+		ho->host = data.Load("host");
+		ho->reason = data.Load("reason");
+		ho->creator = data.Load("creator");
+		ho->created = data.Load<time_t>("created");
+		ho->expires = data.Load<time_t>("expires");
 
 		if (!obj)
 			host_offers->Add(ho);
@@ -669,7 +669,7 @@ public:
 		{
 			if (!show_all)
 				return;
-			mask = Anope::Format(Language::Translate(source.GetAccount(), _("%s [Invalid]")), mask.c_str());
+			mask = Anope::Format(source.Translate(_("%s [Invalid]")), mask.c_str());
 		}
 
 		ListFormatter::ListEntry entry;
@@ -835,7 +835,7 @@ private:
 					{
 						if (!show_all)
 							continue;
-						mask = Anope::Format(Language::Translate(source.GetAccount(), _("%s [Invalid]")), mask.c_str());
+						mask = Anope::Format(source.Translate(_("%s [Invalid]")), mask.c_str());
 					}
 
 					ListFormatter::ListEntry entry;

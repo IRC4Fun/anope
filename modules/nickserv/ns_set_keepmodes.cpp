@@ -129,7 +129,7 @@ private:
 			if (s->GetSerializableType()->GetName() != NICKCORE_TYPE)
 				return;
 
-			const NickCore *nc = anope_dynamic_static_cast<const NickCore *>(s);
+			const auto *nc = anope_dynamic_static_cast<const NickCore *>(s);
 			Anope::string modes;
 			for (const auto &[last_mode, last_data] : nc->last_modes)
 			{
@@ -155,11 +155,11 @@ private:
 			if (s->GetSerializableType()->GetName() != NICKCORE_TYPE)
 				return;
 
-			NickCore *nc = anope_dynamic_static_cast<NickCore *>(s);
-			Anope::string modes;
-			data["last_modes"] >> modes;
+			auto *nc = anope_dynamic_static_cast<NickCore *>(s);
 			nc->last_modes.clear();
-			for (spacesepstream sep(modes); sep.GetToken(modes);)
+
+			spacesepstream sep(data.Load("last_modes"));
+			for (Anope::string modes; sep.GetToken(modes);)
 			{
 				if (modes[0] == '+')
 				{

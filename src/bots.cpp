@@ -111,7 +111,7 @@ BotInfo::~BotInfo()
 		IRCD->SendSQLineDel(&x);
 	}
 
-	for (std::set<ChannelInfo *>::iterator it = this->channels->begin(), it_end = this->channels->end(); it != it_end;)
+	for (auto it = this->channels->begin(), it_end = this->channels->end(); it != it_end;)
 	{
 		ChannelInfo *ci = *it++;
 		this->UnAssign(NULL, ci);
@@ -142,21 +142,16 @@ void BotInfo::Type::Serialize(Serializable *obj, Serialize::Data &data) const
 
 Serializable *BotInfo::Type::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string nick, user, host, realname, flags;
-
-	data["nick"] >> nick;
-	data["user"] >> user;
-	data["host"] >> host;
-	data["realname"] >> realname;
+	const auto nick = data.Load("nick");
 
 	BotInfo *bi;
 	if (obj)
 		bi = anope_dynamic_static_cast<BotInfo *>(obj);
 	else if (!(bi = BotInfo::Find(nick, true)))
-		bi = new BotInfo(nick, user, host, realname);
+		bi = new BotInfo(nick, data.Load("user"), data.Load("host"), data.Load("realname"));
 
-	data["created"] >> bi->created;
-	data["oper_only"] >> bi->oper_only;
+	bi->created = data.Load<time_t>("created");
+	bi->oper_only = data.Load<bool>("oper_only");
 
 	Extensible::ExtensibleUnserialize(bi, bi, data);
 
@@ -303,7 +298,7 @@ CommandInfo &BotInfo::SetCommand(const Anope::string &cname, const Anope::string
 
 CommandInfo *BotInfo::GetCommand(const Anope::string &cname)
 {
-	CommandInfo::map::iterator it = this->commands.find(cname);
+	auto it = this->commands.find(cname);
 	if (it != this->commands.end())
 		return &it->second;
 	return NULL;
@@ -345,7 +340,7 @@ BotInfo *BotInfo::Find(const Anope::string &nick, bool nick_only)
 {
 	if (!nick_only && IRCD != NULL && IRCD->RequiresID)
 	{
-		botinfo_map::iterator it = BotListByUID->find(nick);
+		auto it = BotListByUID->find(nick);
 		if (it != BotListByUID->end())
 		{
 			BotInfo *bi = it->second;
@@ -357,7 +352,7 @@ BotInfo *BotInfo::Find(const Anope::string &nick, bool nick_only)
 			return NULL;
 	}
 
-	botinfo_map::iterator it = BotListByNick->find(nick);
+	auto it = BotListByNick->find(nick);
 	if (it != BotListByNick->end())
 	{
 		BotInfo *bi = it->second;

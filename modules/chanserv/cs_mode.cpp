@@ -270,11 +270,7 @@ void ModeLockTypeImpl::Serialize(Serializable *obj, Serialize::Data &data) const
 
 Serializable *ModeLockTypeImpl::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string sci;
-
-	data["ci"] >> sci;
-
-	ChannelInfo *ci = ChannelInfo::Find(sci);
+	auto *ci = ChannelInfo::Find(data.Load("ci"));
 	if (!ci)
 		return NULL;
 
@@ -287,11 +283,11 @@ Serializable *ModeLockTypeImpl::Unserialize(Serializable *obj, Serialize::Data &
 		ml->ci = ci->name;
 	}
 
-	data["set"] >> ml->set;
-	data["created"] >> ml->created;
-	data["setter"] >> ml->setter;
-	data["name"] >> ml->name;
-	data["param"] >> ml->param;
+	ml->set = data.Load<bool>("set");
+	ml->created = data.Load<time_t>("created");
+	ml->setter = data.Load("setter");
+	ml->name = data.Load("name");
+	ml->param = data.Load("param");
 
 	if (!obj)
 		ci->Require<ModeLocksImpl>(CHANSERV_MODE_LOCK_EXT)->mlocks->push_back(ml);
@@ -601,7 +597,7 @@ class CommandCSMode final
 									}
 								}
 
-								for (Channel::ChanUserList::const_iterator it = ci->c->users.begin(), it_end = ci->c->users.end(); it != it_end;)
+								for (auto it = ci->c->users.begin(), it_end = ci->c->users.end(); it != it_end;)
 								{
 									auto *memb = it->second;
 									++it;
@@ -949,9 +945,9 @@ public:
 		if (!m.second.empty())
 		{
 			if (m.first)
-				return Anope::Format(Language::Translate(source.GetAccount(), _("Gives you or the specified nick %s status on a channel")), m.second.c_str());
+				return Anope::Format(source.Translate(_("Gives you or the specified nick %s status on a channel")), m.second.c_str());
 			else
-				return Anope::Format(Language::Translate(source.GetAccount(), _("Removes %s status from you or the specified nick on a channel")), m.second.c_str());
+				return Anope::Format(source.Translate(_("Removes %s status from you or the specified nick on a channel")), m.second.c_str());
 		}
 		else
 			return "";
@@ -1102,7 +1098,7 @@ public:
 				Anope::string param;
 				if (cm->type == MODE_PARAM)
 				{
-					ChannelModeParam *cmp = anope_dynamic_static_cast<ChannelModeParam *>(cm);
+					auto *cmp = anope_dynamic_static_cast<ChannelModeParam *>(cm);
 					if (add || !cmp->minus_no_arg)
 					{
 						sep.GetToken(param);

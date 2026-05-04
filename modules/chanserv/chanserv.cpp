@@ -357,7 +357,7 @@ public:
 		if (!chanserv_expire || Anope::NoExpire || Anope::ReadOnly)
 			return;
 
-		for (registered_channel_map::const_iterator it = RegisteredChannelList->begin(), it_end = RegisteredChannelList->end(); it != it_end; )
+		for (auto it = RegisteredChannelList->begin(), it_end = RegisteredChannelList->end(); it != it_end; )
 		{
 			ChannelInfo *ci = it->second;
 			++it;
@@ -369,7 +369,7 @@ public:
 				if (ci->c)
 				{
 					time_t last_used = ci->last_used;
-					for (Channel::ChanUserList::const_iterator cit = ci->c->users.begin(), cit_end = ci->c->users.end(); cit != cit_end && last_used == ci->last_used; ++cit)
+					for (auto cit = ci->c->users.begin(), cit_end = ci->c->users.end(); cit != cit_end && last_used == ci->last_used; ++cit)
 						ci->AccessFor(cit->second->user);
 					expire = last_used == ci->last_used;
 				}
@@ -397,11 +397,10 @@ public:
 		return EVENT_CONTINUE;
 	}
 
-	void OnUplinkSync(Server* s) override
+	void OnUplinkSync(Server *s) override
 	{
 		// We need to do this when the uplink is synced as we may not know if
 		// the mode exists before then on some IRCds (e.g. InspIRCd).
-
 		if (!persist)
 			return;
 

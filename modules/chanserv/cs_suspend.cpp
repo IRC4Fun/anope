@@ -42,25 +42,22 @@ struct CSSuspendInfoType final
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		Anope::string schan;
-		data["chan"] >> schan;
-
 		CSSuspendInfo *si;
 		if (obj)
 			si = anope_dynamic_static_cast<CSSuspendInfo *>(obj);
 		else
 		{
-			ChannelInfo *ci = ChannelInfo::Find(schan);
+			auto *ci = ChannelInfo::Find(data.Load("chan"));
 			if (!ci)
 				return NULL;
 			si = ci->Extend<CSSuspendInfo>("CS_SUSPENDED");
-			data["chan"] >> si->what;
+			si->what = ci->name;
 		}
 
-		data["by"] >> si->by;
-		data["reason"] >> si->reason;
-		data["time"] >> si->when;
-		data["expires"] >> si->expires;
+		si->by = data.Load("by");
+		si->reason = data.Load("reason");
+		si->when = data.Load<time_t>("time");
+		si->expires = data.Load<time_t>("expires");
 		return si;
 	}
 };
@@ -116,7 +113,7 @@ public:
 		for (auto idx = reason_idx; idx < params.size(); ++idx)
 			reason.append(reason.empty() ? "" : " ").append(params[idx]);
 
-		CSSuspendInfo *si = ci->Extend<CSSuspendInfo>("CS_SUSPENDED");
+		auto *si = ci->Extend<CSSuspendInfo>("CS_SUSPENDED");
 		si->what = ci->name;
 		si->by = source.GetNick();
 		si->reason = reason;
@@ -186,7 +183,7 @@ public:
 		}
 
 		/* Only UNSUSPEND already suspended channels */
-		CSSuspendInfo *si = ci->GetExt<CSSuspendInfo>("CS_SUSPENDED");
+		auto *si = ci->GetExt<CSSuspendInfo>("CS_SUSPENDED");
 		if (!si)
 		{
 			source.Reply(_("Channel \002%s\002 isn't suspended."), ci->name.c_str());
@@ -254,7 +251,7 @@ public:
 
 	void OnReload(Configuration::Conf &conf) override
 	{
-		Anope::string s = conf.GetModule(this).Get<Anope::string>("show");
+		auto s = conf.GetModule(this).Get<Anope::string>("show");
 		commasepstream(s).GetTokens(show);
 		std::transform(show.begin(), show.end(), show.begin(), trim());
 	}

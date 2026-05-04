@@ -77,10 +77,10 @@ OperInfoImpl::~OperInfoImpl()
 	Extensible *e = OperInfos::Find(target);
 	if (e)
 	{
-		OperInfos *op  = e->GetExt<OperInfos>("operinfo");
+		auto *op  = e->GetExt<OperInfos>("operinfo");
 		if (op)
 		{
-			std::vector<OperInfo *>::iterator it = std::find((*op)->begin(), (*op)->end(), this);
+			auto it = std::find((*op)->begin(), (*op)->end(), this);
 			if (it != (*op)->end())
 				(*op)->erase(it);
 		}
@@ -89,14 +89,13 @@ OperInfoImpl::~OperInfoImpl()
 
 Serializable *OperInfoTypeImpl::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string starget;
-	data["target"] >> starget;
+	const auto starget = data.Load("target");
 
 	Extensible *e = OperInfos::Find(starget);
 	if (!e)
 		return NULL;
 
-	OperInfos *oi = e->Require<OperInfos>("operinfo");
+	auto *oi = e->Require<OperInfos>("operinfo");
 	OperInfoImpl *o;
 	if (obj)
 		o = anope_dynamic_static_cast<OperInfoImpl *>(obj);
@@ -105,9 +104,9 @@ Serializable *OperInfoTypeImpl::Unserialize(Serializable *obj, Serialize::Data &
 		o = new OperInfoImpl();
 		o->target = starget;
 	}
-	data["info"] >> o->info;
-	data["adder"] >> o->adder;
-	data["created"] >> o->created;
+	o->info = data.Load("info");
+	o->adder = data.Load("adder");
+	o->created = data.Load<time_t>("created");
 
 	if (!obj)
 		(*oi)->push_back(o);
@@ -162,7 +161,7 @@ public:
 				return;
 			}
 
-			OperInfos *oi = e->Require<OperInfos>("operinfo");
+			auto *oi = e->Require<OperInfos>("operinfo");
 
 			if ((*oi)->size() >= Config->GetModule(this->module).Get<unsigned>("max", "10"))
 			{
@@ -195,7 +194,7 @@ public:
 				return;
 			}
 
-			OperInfos *oi = e->GetExt<OperInfos>("operinfo");
+			auto *oi = e->GetExt<OperInfos>("operinfo");
 
 			if (!oi)
 			{
@@ -234,7 +233,7 @@ public:
 		}
 		else if (cmd.equals_ci("CLEAR"))
 		{
-			OperInfos *oi = e->GetExt<OperInfos>("operinfo");
+			auto *oi = e->GetExt<OperInfos>("operinfo");
 
 			if (!oi)
 			{

@@ -73,7 +73,7 @@ public:
 		}
 
 		Anope::string spattern = "#" + pattern;
-		unsigned listmax = Config->GetModule(this->owner).Get<unsigned>("listmax", "50");
+		auto listmax = Config->GetModule(this->owner).Get<unsigned>("listmax", "50");
 
 		source.Reply(_("List of entries matching \002%s\002:"), pattern.c_str());
 
@@ -122,7 +122,7 @@ public:
 					ListFormatter::ListEntry entry;
 					entry["Name"] = (isnoexpire ? "!" : "") + ci->name;
 					if (ci->HasExt("CS_SUSPENDED"))
-						entry["Description"] = Language::Translate(source.GetAccount(), _("[Suspended]"));
+						entry["Description"] = source.Translate(_("[Suspended]"));
 					else
 						entry["Description"] = ci->desc;
 					list.AddEntry(entry);
@@ -245,7 +245,7 @@ public:
 
 		BotInfo *bi;
 		Anope::string cmd;
-		if (Command::FindCommandFromService("chanserv/list", bi, cmd))
+		if (Command::FindFromService("chanserv/list", bi, cmd))
 		{
 			source.Reply(_("When \002private\002 is set, the channel will not appear in %s's %s command."),
 				bi->nick.c_str(), cmd.c_str());

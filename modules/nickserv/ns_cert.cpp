@@ -184,8 +184,8 @@ public:
 		FOREACH_MOD(OnNickClearCert, (this->nc));
 		for (const auto *cert : certs)
 		{
-			delete cert;
 			certmap.erase(cert->fingerprint);
+			delete cert;
 		}
 		this->certs.clear();
 	}
@@ -207,21 +207,24 @@ public:
 			if (s->GetSerializableType()->GetName() != NICKCORE_TYPE)
 				return;
 
+			const auto certstr = data.Load("cert");
+			if (certstr.empty())
+				return; // Nothing to do.
+
 			auto *nc = anope_dynamic_static_cast<NickCore *>(e);
 			auto *cl = this->Require(nc);
 
 			// Delete the old cert list.
 			for (const auto *cert : cl->certs)
 			{
-				delete cert;
 				certmap.erase(cert->fingerprint);
+				delete cert;
 			}
 			cl->certs.clear();
 
 			// Add the new cert list
-			Anope::string buf;
-			data["cert"] >> buf;
-			for (spacesepstream sep(buf); sep.GetToken(buf); )
+			spacesepstream sep(certstr);
+			for (Anope::string buf; sep.GetToken(buf); )
 			{
 				auto *cert = new NSCertInfo(e);
 				cert->fingerprint = buf;
@@ -255,10 +258,7 @@ public:
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		uint64_t account = 0;
-		data["account"] >> account;
-
-		auto *nc = NickCore::FindId(account);
+		auto *nc = NickCore::FindId(data.Load<uint64_t>("account"));
 		if (!nc)
 			return nullptr; // Missing user.
 
@@ -268,10 +268,10 @@ public:
 		else
 			cert = new NSCertInfo(nc);
 
-		data["created"] >> cert->created;
-		data["creator"] >> cert->creator;
-		data["description"] >> cert->description;
-		data["fingerprint"] >> cert->fingerprint;
+		cert->created = data.Load<time_t>("created");
+		cert->creator = data.Load("creator");
+		cert->description = data.Load("description");
+		cert->fingerprint = data.Load("fingerprint");
 
 		if (!obj)
 		{
@@ -652,6 +652,7 @@ private:
 	NSCertListImpl::ExtensibleItem certs;
 	CertServiceImpl cs;
 	NSCertInfoType cert_type;
+	SerializableExtensibleItem<bool> autologin;
 
 	bool CanLogin(User *u, NickCore *nc)
 	{
@@ -681,6 +682,7 @@ public:
 		, commandnssasetautologin(this)
 		, certs(this, NICKSERV_CERT_EXT)
 		, cs(this)
+		, autologin(this, "AUTOLOGIN")
 	{
 		if (!IRCD || !IRCD->CanCertFP)
 			throw ModuleException("Your IRCd does not support ssl client certificates");

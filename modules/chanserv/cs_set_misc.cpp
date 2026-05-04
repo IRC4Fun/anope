@@ -77,23 +77,20 @@ struct CSMiscDataType
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		Anope::string sci, sname, sdata;
-
-		data["ci"] >> sci;
-		data["name"] >> sname;
-		data["data"] >> sdata;
-
-		ChannelInfo *ci = ChannelInfo::Find(sci);
+		auto *ci = ChannelInfo::Find(data.Load("ci"));
 		if (ci == NULL)
 			return NULL;
+
+		const auto sname = data.Load("name");
+		const auto sdata = data.Load("data");
 
 		CSMiscData *d = NULL;
 		if (obj)
 		{
 			d = anope_dynamic_static_cast<CSMiscData *>(obj);
 			d->object = ci->name;
-			data["name"] >> d->name;
-			data["data"] >> d->data;
+			d->name = sname;
+			d->data = sdata;
 		}
 		else
 		{
@@ -225,7 +222,7 @@ public:
 		{
 			this->SendSyntax(source);
 			source.Reply(" ");
-			source.Reply("%s", Language::Translate(source.nc, it->second.description.c_str()));
+			source.Reply("%s", source.Translate(it->second.description.c_str()));
 			return true;
 		}
 		return false;
@@ -240,8 +237,8 @@ public:
 
 		this->ClearSyntax();
 		this->SetSyntax(Anope::Format(
-			Language::Translate(source.nc, _("\037channel\037 [\037%s\037]")),
-			Language::Translate(source.nc, value)
+			source.Translate(_("\037channel\037 [\037%s\037]")),
+			source.Translate(value)
 		));
 
 		Command::SendSyntax(source);

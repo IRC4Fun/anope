@@ -75,10 +75,7 @@ struct HostRequestTypeImpl final
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		Anope::string snick;
-		data["nick"] >> snick;
-
-		NickAlias *na = NickAlias::Find(snick);
+		auto *na = NickAlias::Find(data.Load("nick"));
 		if (na == NULL)
 			return NULL;
 
@@ -90,11 +87,11 @@ struct HostRequestTypeImpl final
 		if (req)
 		{
 			req->nick = na->nick;
-			data["ident"] >> req->ident;
-			data["host"] >> req->host;
-			data["time"] >> req->time;
-			data["validation_token"] >> req->validation_token;
-			data["last_validation"] >> req->last_validation;
+			req->ident = data.Load("ident");
+			req->host = data.Load("host");
+			req->time = data.Load<time_t>("time");
+			req->validation_token = data.Load("validation_token");
+			req->last_validation = data.Load<time_t>("last_validation");
 		}
 
 		return req;
@@ -285,7 +282,7 @@ public:
 
 		BotInfo *bi;
 		Anope::string cmd;
-		if (dnsmanager && Command::FindCommandFromService("hostserv/validate", bi, cmd))
+		if (dnsmanager && Command::FindFromService("hostserv/validate", bi, cmd))
 		{
 			source.Reply(_(
 					"Your vhost \002%s\002 has been requested. If the requested vhost is for a valid "
@@ -404,7 +401,7 @@ public:
 				else
 					message = _("Your requested vhost has been rejected.");
 
-				MemoServ::service->Send(source.service->nick, nick, Language::Translate(source.GetAccount(), message.c_str()), true);
+				MemoServ::service->Send(source.service->nick, nick, source.Translate(message.c_str()), true);
 			}
 
 			source.Reply(_("VHost for %s has been rejected."), nick.c_str());

@@ -147,7 +147,7 @@ struct BadWordsImpl final
 
 BadWordsImpl::~BadWordsImpl()
 {
-	for (list::iterator it = badwords->begin(); it != badwords->end();)
+	for (auto it = badwords->begin(); it != badwords->end();)
 	{
 		auto *bw = *it;
 		++it;
@@ -160,10 +160,10 @@ BadWordImpl::~BadWordImpl()
 	ChannelInfo *ci = ChannelInfo::Find(chan);
 	if (ci)
 	{
-		BadWordsImpl *badwords = ci->GetExt<BadWordsImpl>(BOTSERV_BAD_WORDS_EXT);
+		auto *badwords = ci->GetExt<BadWordsImpl>(BOTSERV_BAD_WORDS_EXT);
 		if (badwords)
 		{
-			BadWordsImpl::list::iterator it = std::find(badwords->badwords->begin(), badwords->badwords->end(), this);
+			auto it = std::find(badwords->badwords->begin(), badwords->badwords->end(), this);
 			if (it != badwords->badwords->end())
 				badwords->badwords->erase(it);
 		}
@@ -172,28 +172,20 @@ BadWordImpl::~BadWordImpl()
 
 Serializable *BadWordTypeImpl::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string sci, sword;
-
-	data["ci"] >> sci;
-	data["word"] >> sword;
-
-	ChannelInfo *ci = ChannelInfo::Find(sci);
+	auto *ci = ChannelInfo::Find(data.Load("ci"));
 	if (!ci)
 		return NULL;
-
-	Anope::string n;
-	data["type"] >> n;
 
 	BadWordImpl *bw;
 	if (obj)
 		bw = anope_dynamic_static_cast<BadWordImpl *>(obj);
 	else
 		bw = new BadWordImpl();
-	bw->chan = sci;
-	bw->word = sword;
-	bw->type = StringToType(n);
+	bw->chan = ci->name;
+	bw->word = data.Load("word");
+	bw->type = StringToType(data.Load("type"));
 
-	BadWordsImpl *bws = ci->Require<BadWordsImpl>(BOTSERV_BAD_WORDS_EXT);
+	auto *bws = ci->Require<BadWordsImpl>(BOTSERV_BAD_WORDS_EXT);
 	if (!obj)
 		bws->badwords->push_back(bw);
 
@@ -337,7 +329,7 @@ private:
 			realword = word.substr(0, pos);
 		}
 
-		unsigned badwordsmax = Config->GetModule(this->module).Get<unsigned>("badwordsmax");
+		auto badwordsmax = Config->GetModule(this->module).Get<unsigned>("badwordsmax");
 		if (badwords->GetBadWordCount() >= badwordsmax)
 		{
 			source.Reply(_("You can only have %d bad words entries on a channel."), badwordsmax);
@@ -496,7 +488,7 @@ public:
 				"\n\n"
 				"The \002DEL\002 command removes the given word from the "
 				"bad words list. If a list of entry numbers is given, those "
-				"entries are deleted.  (See the example for LIST below.)"
+				"entries are deleted."
 				"\n\n"
 				"The \002LIST\002 command displays the bad words list. If "
 				"a wildcard mask is given, only those entries matching the "
@@ -509,14 +501,44 @@ public:
 			source.service->GetQueryCommand("generic/help").c_str(),
 			source.command.nobreak().c_str());
 
-		ExampleWrapper examples;
-		examples.AddEntry("#channel LIST 2-5,7-9", _(
-			"Lists bad word entries on \037#channel\037 numbered 2 through 5 and 7 through 9."
-		));
-		examples.AddEntry("#channel LIST *UwU*", _(
-			"Lists bad word entries on \037#channel\037 that match \037*UwU*\037."
-		));
-		examples.SendTo(source);
+		ExampleWrapper()
+			.AddEntry("#channel ADD smeg", _(
+				"Add \035smeg\035 to the bad word list of \035#channel\035. If a user says this "
+				"word anywhere in a message they will be kicked."
+			))
+			.AddEntry("#channel ADD smeg SINGLE", _(
+				"Add \035smeg\035 to the bad word list of \035#channel\035. If a user says only "
+				"this word in a message they will be kicked."
+			))
+			.AddEntry("#channel ADD smeg START", _(
+				"Add \035smeg\035 to the bad word list of \035#channel\035. If a user says this "
+				"word at the start of a message they will be kicked."
+			))
+			.AddEntry("#channel ADD smeg END", _(
+				"Add \035smeg\035 to the bad word list of \035#channel\035. If a user says this "
+				"word at the start of a message they will be kicked."
+			))
+			.AddEntry("#channel CLEAR", _(
+				"Clears all bad word entries set on \035#channel\035."
+			))
+			.AddEntry("#channel DEL 2-5,7-9", _(
+				"Deletes bad word entries set on \035#channel\035 numbered 2 through 5 and 7 "
+				"through 9."
+			))
+			.AddEntry("#channel DEL heck", _(
+				"Deletes \035heck\035 from the bad word list of \035#channel\035."
+			))
+			.AddEntry("#channel LIST", _(
+				"Lists all bad word entries set on \035#channel\035."
+			))
+			.AddEntry("#channel LIST 2-5,7-9", _(
+				"Lists bad word entries set on \035#channel\035 numbered 2 through 5 and 7 through "
+				"9."
+			))
+			.AddEntry("#channel LIST *frack*", _(
+				"Lists bad word entries set on \035#channel\035 that match \035*frack*\035."
+			))
+			.SendTo(source);
 
 		return true;
 	}

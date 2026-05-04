@@ -187,11 +187,7 @@ void XLine::Type::Serialize(Serializable *obj, Serialize::Data &data) const
 
 Serializable *XLine::Type::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
-	Anope::string smanager;
-
-	data["manager"] >> smanager;
-
-	ServiceReference<XLineManager> xlm("XLineManager", smanager);
+	ServiceReference<XLineManager> xlm("XLineManager", data.Load("manager"));
 	if (!xlm)
 		return NULL;
 
@@ -199,10 +195,10 @@ Serializable *XLine::Type::Unserialize(Serializable *obj, Serialize::Data &data)
 	if (obj)
 	{
 		xl = anope_dynamic_static_cast<XLine *>(obj);
-		data["mask"] >> xl->mask;
-		data["by"] >> xl->by;
-		data["reason"] >> xl->reason;
-		data["uid"] >> xl->id;
+		xl->mask = data.Load("mask");
+		xl->by = data.Load("by");
+		xl->reason = data.Load("reason");
+		xl->id = data.Load("uid");
 
 		if (xlm != xl->manager)
 		{
@@ -212,20 +208,12 @@ Serializable *XLine::Type::Unserialize(Serializable *obj, Serialize::Data &data)
 	}
 	else
 	{
-		Anope::string smask, sby, sreason, suid;
-		time_t expires;
-
-		data["mask"] >> smask;
-		data["by"] >> sby;
-		data["reason"] >> sreason;
-		data["uid"] >> suid;
-		data["expires"] >> expires;
-
-		xl = new XLine(smask, sby, expires, sreason, suid);
+		xl = new XLine(data.Load("mask"), data.Load("by"), data.Load<time_t>("expires"),
+			data.Load("reason"), data.Load("uid"));
 		xlm->AddXLine(xl);
 	}
 
-	data["created"] >> xl->created;
+	xl->created = data.Load<time_t>("created");
 	xl->manager = xlm;
 
 	return xl;
@@ -238,7 +226,7 @@ void XLineManager::RegisterXLineManager(XLineManager *xlm)
 
 void XLineManager::UnregisterXLineManager(XLineManager *xlm)
 {
-	std::list<XLineManager *>::iterator it = std::find(XLineManagers.begin(), XLineManagers.end(), xlm);
+	auto it = std::find(XLineManagers.begin(), XLineManagers.end(), xlm);
 
 	if (it != XLineManagers.end())
 		XLineManagers.erase(it);
@@ -320,11 +308,11 @@ void XLineManager::RemoveXLine(XLine *x)
 {
 	/* called from the destructor */
 
-	std::vector<XLine *>::iterator it = std::find(this->xlines->begin(), this->xlines->end(), x);
+	auto it = std::find(this->xlines->begin(), this->xlines->end(), x);
 
 	if (!x->id.empty())
 	{
-		std::multimap<Anope::string, XLine *, ci::less>::iterator it2 = XLinesByUID->find(x->id), it3 = XLinesByUID->upper_bound(x->id);
+		auto it2 = XLinesByUID->find(x->id), it3 = XLinesByUID->upper_bound(x->id);
 		for (; it2 != XLinesByUID->end() && it2 != it3; ++it2)
 			if (it2->second == x)
 			{
@@ -342,11 +330,11 @@ void XLineManager::RemoveXLine(XLine *x)
 
 bool XLineManager::DelXLine(XLine *x)
 {
-	std::vector<XLine *>::iterator it = std::find(this->xlines->begin(), this->xlines->end(), x);
+	auto it = std::find(this->xlines->begin(), this->xlines->end(), x);
 
 	if (!x->id.empty())
 	{
-		std::multimap<Anope::string, XLine *, ci::less>::iterator it2 = XLinesByUID->find(x->id), it3 = XLinesByUID->upper_bound(x->id);
+		auto it2 = XLinesByUID->find(x->id), it3 = XLinesByUID->upper_bound(x->id);
 		for (; it2 != XLinesByUID->end() && it2 != it3; ++it2)
 			if (it2->second == x)
 			{
@@ -441,9 +429,9 @@ bool XLineManager::CanAdd(CommandSource &source, const Anope::string &mask, time
 
 XLine *XLineManager::HasEntry(const Anope::string &mask)
 {
-	std::multimap<Anope::string, XLine *, ci::less>::iterator it = XLinesByUID->find(mask);
+	auto it = XLinesByUID->find(mask);
 	if (it != XLinesByUID->end())
-		for (std::multimap<Anope::string, XLine *, ci::less>::iterator it2 = XLinesByUID->upper_bound(mask); it != it2; ++it)
+		for (auto it2 = XLinesByUID->upper_bound(mask); it != it2; ++it)
 			if (it->second->manager == NULL || it->second->manager == this)
 			{
 				it->second->QueueUpdate();

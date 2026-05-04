@@ -205,7 +205,7 @@ public:
 		ListLimits *limits = maxlist.Get(c);
 		if (limits)
 		{
-			ListLimits::const_iterator limit = limits->find(cm->mchar);
+			auto limit = limits->find(cm->mchar);
 			if (limit != limits->end())
 				return limit->second;
 		}
@@ -1709,6 +1709,21 @@ struct IRCDMessageFIdent final
 	}
 };
 
+struct IRCDMessageFName final
+	: IRCDMessage
+{
+	IRCDMessageFName(Module *creator)
+		: IRCDMessage(creator, "FNAME", 1)
+	{
+		SetFlag(FLAG_REQUIRE_USER);
+	}
+
+	void Run(MessageSource &source, const std::vector<Anope::string> &params, const Anope::map<Anope::string> &tags) override
+	{
+		source.GetUser()->SetRealname(params[0]);
+	}
+};
+
 struct IRCDMessageKick final
 	: IRCDMessage
 {
@@ -1768,11 +1783,7 @@ struct IRCDMessageSave final
 		if (targ->server == Me && (bi = dynamic_cast<BotInfo *>(targ)))
 		{
 			if (last_collide == Anope::CurTime)
-			{
-				Anope::QuitReason = "Nick collision fight on " + targ->nick;
-				Anope::Quitting = true;
-				return;
-			}
+				throw ProtocolException("Nick collision fight on " + targ->nick);
 
 			IRCD->SendKill(Me, targ->nick, "Nick collision");
 			IRCD->SendNickChange(targ, targ->nick);
@@ -2352,7 +2363,7 @@ struct IRCDMessageServer final
 			 * 2: numeric
 			 * 3: desc
 			 */
-			new Server(Me, params[0], 0, params.back(), params[2]);
+			new Server(Me, params[0], params.back(), params[2]);
 		}
 		else if (source.GetServer())
 		{
@@ -2363,7 +2374,7 @@ struct IRCDMessageServer final
 			 * 2 to N-1: various key=value pairs.
 			 * N: desc
 			 */
-			new Server(source.GetServer(), params[0], 1, params.back(), params[1]);
+			new Server(source.GetServer(), params[0], params.back(), params[1]);
 		}
 	}
 };
@@ -2416,7 +2427,7 @@ struct IRCDMessageUID final
 
 		NickAlias *na = NULL;
 		if (SASL::service)
-			for (std::list<SASLUser>::iterator it = saslusers.begin(); it != saslusers.end();)
+			for (auto it = saslusers.begin(); it != saslusers.end();)
 			{
 				SASLUser &u = *it;
 
@@ -2470,6 +2481,7 @@ class ProtoInspIRCd final
 	IRCDMessageEndburst message_endburst;
 	IRCDMessageFHost message_fhost;
 	IRCDMessageFIdent message_fident;
+	IRCDMessageFName message_fname;
 	IRCDMessageFJoin message_fjoin;
 	IRCDMessageFMode message_fmode;
 	IRCDMessageFTopic message_ftopic;
@@ -2521,6 +2533,7 @@ public:
 		, message_endburst(this)
 		, message_fhost(this)
 		, message_fident(this)
+		, message_fname(this)
 		, message_fjoin(this)
 		, message_fmode(this)
 		, message_ftopic(this)

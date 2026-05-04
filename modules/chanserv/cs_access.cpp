@@ -23,6 +23,17 @@ static inline void reset_levels(ChannelInfo *ci)
 		ci->SetLevel(priv, level);
 }
 
+static Anope::string LevelToString(CommandSource &source, int16_t level)
+{
+	if (level == ACCESS_INVALID)
+		return source.Translate(_("(disabled)"));
+
+	if (level == ACCESS_FOUNDER)
+		return source.Translate(_("(founder only)"));
+
+	return Anope::ToString(level);
+}
+
 class AccessChanAccess final
 	: public ChanAccess
 {
@@ -276,7 +287,7 @@ private:
 		ServiceReference<AccessProvider> provider("AccessProvider", "access/access");
 		if (!provider)
 			return;
-		AccessChanAccess *access = anope_dynamic_static_cast<AccessChanAccess *>(provider->Create());
+		auto *access = anope_dynamic_static_cast<AccessChanAccess *>(provider->Create());
 		access->SetMask(mask, ci);
 		access->creator = source.GetNick();
 		access->level = level;
@@ -285,7 +296,7 @@ private:
 		access->description = description;
 		ci->AddAccess(access);
 
-		FOREACH_MOD(OnAccessAdd, (ci, source, access));
+		FOREACH_MOD(OnAccessAdd, (ci, source, access, false));
 
 		Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to add " << mask << " with level " << level;
 		if (p != NULL)
@@ -376,7 +387,7 @@ private:
 
 					ci->EraseAccess(Number - 1);
 
-					FOREACH_MOD(OnAccessDel, (ci, source, access));
+					FOREACH_MOD(OnAccessDel, (ci, source, access, false));
 					delete access;
 				}
 			}
@@ -402,7 +413,7 @@ private:
 						Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to delete " << access->Mask();
 
 						ci->EraseAccess(i - 1);
-						FOREACH_MOD(OnAccessDel, (ci, source, access));
+						FOREACH_MOD(OnAccessDel, (ci, source, access, false));
 						delete access;
 					}
 					return;
@@ -416,6 +427,8 @@ private:
 	void ProcessList(CommandSource &source, ChannelInfo *ci, const std::vector<Anope::string> &params, ListFormatter &list)
 	{
 		const Anope::string &nick = params.size() > 2 ? params[2] : "";
+		const auto show_all = params.size() > 3 && params[3].equals_ci("ALL");
+		unsigned foreign = 0;
 
 		if (!ci->GetAccessCount())
 			source.Reply(_("%s access list is empty."), ci->name.c_str());
@@ -426,9 +439,16 @@ private:
 			{
 				ListFormatter &list;
 				ChannelInfo *ci;
+				bool show_all;
+				unsigned &foreign;
 
 			public:
-				AccessListCallback(ListFormatter &_list, ChannelInfo *_ci, const Anope::string &numlist) : NumberList(numlist, false), list(_list), ci(_ci)
+				AccessListCallback(ListFormatter &_list, ChannelInfo *_ci, const Anope::string &numlist, bool _show_all, unsigned &_foreign)
+					: NumberList(numlist, false)
+					, list(_list)
+					, ci(_ci)
+					, show_all(_show_all)
+					, foreign(_foreign)
 				{
 				}
 
@@ -438,11 +458,16 @@ private:
 						return;
 
 					const ChanAccess *access = ci->GetAccess(number - 1);
+					if (!show_all && access->provider->name != "access/access")
+					{
+						foreign++;
+						return;
+					}
 
 					AddEntry(this->list, ci, access, number);
 				}
 			}
-			nl_list(list, ci, nick);
+			nl_list(list, ci, nick, show_all, foreign);
 			nl_list.Process();
 		}
 		else
@@ -453,6 +478,12 @@ private:
 
 				if (!nick.empty() && !Anope::Match(access->Mask(), nick))
 					continue;
+
+				if (!show_all && access->provider->name != "access/access")
+				{
+					foreign++;
+					continue;
+				}
 
 				AddEntry(list, ci, access, i + 1);
 			}
@@ -465,6 +496,14 @@ private:
 			source.Reply(_("Access list for %s:"), ci->name.c_str());
 			list.SendTo(source);
 			source.Reply(_("End of access list"));
+		}
+
+		if (foreign)
+		{
+			const auto full_command = Anope::Format("%s %s %s %s", source.command.c_str(),
+				ci->name.c_str(), params[1].upper().c_str(), nick.empty() ? "*" : nick.c_str()).nobreak();
+
+			source.Reply(foreign, CHAN_ACCESS_FOREIGN, foreign, full_command.c_str());
 		}
 	}
 
@@ -531,8 +570,8 @@ public:
 		this->SetDesc(_("Modify the list of privileged users"));
 		this->SetSyntax(_("\037channel\037 ADD \037mask\037 \037level\037 [\037description\037]"));
 		this->SetSyntax(_("\037channel\037 DEL {\037mask\037 | \037entry-num\037 | \037list\037}"));
-		this->SetSyntax(_("\037channel\037 LIST [\037mask\037 | \037list\037]"));
-		this->SetSyntax(_("\037channel\037 VIEW [\037mask\037 | \037list\037]"));
+		this->SetSyntax(_("\037channel\037 LIST [\037mask\037 | \037list\037] [ALL]"));
+		this->SetSyntax(_("\037channel\037 VIEW [\037mask\037 | \037list\037] [ALL]"));
 		this->SetSyntax(_("\037channel\037 CLEAR"));
 	}
 
@@ -635,7 +674,8 @@ public:
 				"The \002%s\033LIST\002 command displays the access list. If "
 				"a wildcard mask is given, only those entries matching the "
 				"mask are displayed. If a list of entry numbers is given, "
-				"only those entries are shown."
+				"only those entries are shown. The \002ALL\002 option allows "
+				"listing entries from other access systems as well as levels."
 				"\n\n"
 				"The \002%s\033VIEW\002 command displays the access list similar "
 				"to \002%s\033LIST\002 but shows the creator and last used time."
@@ -660,7 +700,7 @@ public:
 
 		BotInfo *bi;
 		Anope::string cmd;
-		if (Command::FindCommandFromService("chanserv/levels", bi, cmd))
+		if (Command::FindFromService("chanserv/levels", bi, cmd))
 		{
 			source.Reply(" ");
 			source.Reply(_(
@@ -768,14 +808,7 @@ class CommandCSLevels final
 
 			ListFormatter::ListEntry entry;
 			entry["Name"] = p.name;
-
-			if (j == ACCESS_INVALID)
-				entry["Level"] = Language::Translate(source.GetAccount(), _("(disabled)"));
-			else if (j == ACCESS_FOUNDER)
-				entry["Level"] = Language::Translate(source.GetAccount(), _("(founder only)"));
-			else
-				entry["Level"] = Anope::ToString(j);
-
+			entry["Level"] = LevelToString(source, j);
 			list.AddEntry(entry);
 		}
 
@@ -852,14 +885,15 @@ public:
 			source.Reply(_("The following feature/function names are available:"));
 
 			ListFormatter list(source.GetAccount());
-			list.AddColumn(_("Name")).AddColumn(_("Description"));
-			list.SetFlexible(_("\002{name}\002: {description}"));
+			list.AddColumn(_("Name")).AddColumn(_("Default")).AddColumn(_("Description"));
+			list.SetFlexible(_("\002{name}\002: defaults to {default} ({description})"));
 
 			for (const auto &p : PrivilegeManager::GetPrivileges())
 			{
 				ListFormatter::ListEntry entry;
 				entry["Name"] = p.name;
-				entry["Description"] = Language::Translate(source.nc, p.desc.c_str());
+				entry["Default"] = LevelToString(source, defaultLevels[p.name]);
+				entry["Description"] = source.Translate(p.desc.c_str());
 				list.AddEntry(entry);
 			}
 
@@ -960,7 +994,7 @@ public:
 			/* Access accessprovider is the only accessprovider with the concept of negative access,
 			 * so check they don't have negative access
 			 */
-			const AccessChanAccess *aca = anope_dynamic_static_cast<const AccessChanAccess *>(highest);
+			const auto *aca = anope_dynamic_static_cast<const AccessChanAccess *>(highest);
 
 			if (aca->level < 0)
 				return EVENT_CONTINUE;

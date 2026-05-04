@@ -83,7 +83,7 @@ static Anope::string FindReplacement(const TemplateFileServer::Replacements &r, 
 		}
 	}
 
-	TemplateFileServer::Replacements::const_iterator it = r.find(key);
+	auto it = r.find(key);
 	if (it != r.end())
 		return it->second;
 	return "";
@@ -107,7 +107,7 @@ void TemplateFileServer::Serve(HTTP::Provider *server, const Anope::string &page
 	Anope::string buf;
 
 	int i;
-	char buffer[BUFSIZE];
+	char buffer[1024];
 	while ((i = read(fd, buffer, sizeof(buffer) - 1)) > 0)
 	{
 		buffer[i] = 0;

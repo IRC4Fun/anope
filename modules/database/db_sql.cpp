@@ -120,6 +120,12 @@ public:
 		{
 			if (this->sql)
 			{
+				if (!obj->ShouldCommit())
+				{
+					OnSerializableDestruct(obj);
+					continue; // Non-committable object.
+				}
+
 				Serialize::Type *s_type = obj->GetSerializableType();
 				if (!s_type)
 					continue;
@@ -168,7 +174,7 @@ public:
 	{
 		const auto &block = conf.GetModule(this);
 		this->sql.SetServiceName(block.Get<const Anope::string>("engine"));
-		this->prefix = block.Get<const Anope::string>("prefix", "anope_db_");
+		this->prefix = block.Get<const Anope::string>("prefix", "anope21_");
 		this->import = block.Get<bool>("import");
 	}
 
@@ -256,7 +262,7 @@ public:
 			Data data;
 
 			for (const auto &[key, value] : res.Row(j))
-				data[key] << value;
+				data.StoreInternal(key, value);
 
 			Serializable *obj = sb->Unserialize(NULL, data);
 			if (obj)

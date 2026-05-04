@@ -43,25 +43,23 @@ struct NSSuspendInfoType final
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		Anope::string snick;
-		data["nick"] >> snick;
-
 		NSSuspendInfo *si;
 		if (obj)
 			si = anope_dynamic_static_cast<NSSuspendInfo *>(obj);
 		else
 		{
-			NickAlias *na = NickAlias::Find(snick);
+			auto *na = NickAlias::Find(data.Load("nick"));
 			if (!na)
 				return NULL;
+
 			si = na->nc->Extend<NSSuspendInfo>("NS_SUSPENDED");
-			data["nick"] >> si->what;
+			si->what = na->nick;
 		}
 
-		data["by"] >> si->by;
-		data["reason"] >> si->reason;
-		data["time"] >> si->when;
-		data["expires"] >> si->expires;
+		si->by = data.Load("by");
+		si->reason = data.Load("reason");
+		si->when = data.Load<time_t>("time");
+		si->expires = data.Load<time_t>("expires");
 		return si;
 	}
 };
@@ -124,7 +122,7 @@ public:
 		for (auto idx = reason_idx; idx < params.size(); ++idx)
 			reason.append(reason.empty() ? "" : " ").append(params[idx]);
 
-		NSSuspendInfo *si = nc->Extend<NSSuspendInfo>("NS_SUSPENDED");
+		auto *si = nc->Extend<NSSuspendInfo>("NS_SUSPENDED");
 		si->what = nc->display;
 		si->by = source.GetNick();
 		si->reason = reason;
@@ -199,7 +197,7 @@ public:
 			return;
 		}
 
-		NSSuspendInfo *si = na->nc->GetExt<NSSuspendInfo>("NS_SUSPENDED");
+		auto *si = na->nc->GetExt<NSSuspendInfo>("NS_SUSPENDED");
 
 		Log(LOG_ADMIN, source, this) << "for " << na->nick << " which was suspended by " << (!si->by.empty() ? si->by : "(none)") << " for: " << (!si->reason.empty() ? si->reason : "No reason");
 
@@ -258,7 +256,7 @@ public:
 
 	void OnReload(Configuration::Conf &conf) override
 	{
-		Anope::string s = conf.GetModule(this).Get<Anope::string>("show");
+		auto s = conf.GetModule(this).Get<Anope::string>("show");
 		commasepstream(s).GetTokens(show);
 		std::transform(show.begin(), show.end(), show.begin(), trim());
 	}
