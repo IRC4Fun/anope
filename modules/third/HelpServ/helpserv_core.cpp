@@ -253,7 +253,7 @@ Serializable* HelpServStateDataType::Unserialize(Serializable* obj, Serialize::D
         {
                 const Anope::string prefix = "topic" + Anope::ToString(i) + ".";
                 Anope::string topic;
-                uint64_t count;
+                uint64_t count = 0;
                 data.Load(prefix + "name", topic);
                 data.Load(prefix + "count", count);
                 st->topic_hits[topic] = count;
@@ -264,7 +264,7 @@ Serializable* HelpServStateDataType::Unserialize(Serializable* obj, Serialize::D
         {
                 const Anope::string prefix = "helpme_cooldown" + Anope::ToString(i) + ".";
                 Anope::string k;
-                time_t ts;
+                time_t ts = 0;
                 data.Load(prefix + "key", k);
                 data.Load(prefix + "ts", ts);
                 st->helpme_cooldowns[k] = ts;
@@ -276,7 +276,7 @@ Serializable* HelpServStateDataType::Unserialize(Serializable* obj, Serialize::D
         {
                 const Anope::string prefix = "request_cooldown" + Anope::ToString(i) + ".";
                 Anope::string k;
-                time_t ts;
+                time_t ts = 0;
                 data.Load(prefix + "key", k);
                 data.Load(prefix + "ts", ts);
                 st->request_cooldowns[k] = ts;
