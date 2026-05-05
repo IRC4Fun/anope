@@ -114,69 +114,50 @@ void ChanFixChannelDataType::Serialize(Serializable* obj, Serialize::Data& data)
 	}
 }
 
-Serializable* ChanFixChannelDataType::Unserialize(Serializable* obj, Serialize::Data& data) const
+Serializable* ChanFixChannelDataType::Unserialize(Serializable *obj, Serialize::Data &data) const
 {
 	Anope::string name;
-	data["name"] >> name;
+	data.Load("name", name);
+
 	if (name.empty())
-		return nullptr;
+		return NULL;
 
-	CFChannelData* rec = nullptr;
+	CFChannelData *rec;
 	if (obj)
-	{
-		rec = anope_dynamic_static_cast<CFChannelData*>(obj);
-	}
+		rec = anope_dynamic_static_cast<CFChannelData *>(obj);
 	else
+		rec = new CFChannelData(name);
+
+	data.Load("ts", rec->ts);
+	data.Load("lastupdate", rec->lastupdate);
+	data.Load("fix_started", rec->fix_started);
+	data.Load("fix_requested", rec->fix_requested);
+
+	data.Load("marked", rec->marked);
+	data.Load("mark_setter", rec->mark_setter);
+	data.Load("mark_time", rec->mark_time);
+	data.Load("mark_reason", rec->mark_reason);
+
+	data.Load("nofix", rec->nofix);
+	data.Load("nofix_setter", rec->nofix_setter);
+	data.Load("nofix_time", rec->nofix_time);
+	data.Load("nofix_reason", rec->nofix_reason);
+
+	int opcount = 0;
+	data.Load("opcount", opcount);
+
+	for (int i = 0; i < opcount; ++i)
 	{
-		// db_json calls Unserialize with obj == nullptr for all records.
-		// Reuse existing objects (e.g. across MODRELOAD) to avoid duplicates.
-		auto it = ChanFixChannelList->find(name);
-		if (it != ChanFixChannelList->end())
-			rec = it->second;
-		if (!rec)
-			rec = new CFChannelData(name);
-	}
+		Anope::string prefix = "op" + Anope::ToString(i) + ":", key;
+		data.Load(prefix + "key", key);
 
-	data["ts"] >> rec->ts;
-	data["lastupdate"] >> rec->lastupdate;
-	data["fix_started"] >> rec->fix_started;
-	data["fix_requested"] >> rec->fix_requested;
-
-	data["marked"] >> rec->marked;
-	data["mark_setter"] >> rec->mark_setter;
-	data["mark_time"] >> rec->mark_time;
-	data["mark_reason"] >> rec->mark_reason;
-
-	data["nofix"] >> rec->nofix;
-	data["nofix_setter"] >> rec->nofix_setter;
-	data["nofix_time"] >> rec->nofix_time;
-	data["nofix_reason"] >> rec->nofix_reason;
-
-	uint64_t opcount = 0;
-	data["opcount"] >> opcount;
-	rec->oprecords.clear();
-	for (uint64_t i = 0; i < opcount; ++i)
-	{
-		const Anope::string prefix = "op" + Anope::ToString(i) + ".";
-		Anope::string key;
-		CFOpRecord o;
-		data[prefix + "key"] >> key;
-		data[prefix + "account"] >> o.account;
-		data[prefix + "user"] >> o.user;
-		data[prefix + "host"] >> o.host;
-		data[prefix + "firstseen"] >> o.firstseen;
-		data[prefix + "lastevent"] >> o.lastevent;
-		data[prefix + "age"] >> o.age;
-
-		if (key.empty())
-		{
-			if (!o.account.empty() && o.account != "*")
-				key = o.account;
-			else if (!o.user.empty() && !o.host.empty())
-				key = o.user + "@" + o.host;
-		}
-		if (!key.empty())
-			rec->oprecords[key] = std::move(o);
+		CFOpRecord &o = rec->oprecords[key];
+		data.Load(prefix + "account", o.account);
+		data.Load(prefix + "user", o.user);
+		data.Load(prefix + "host", o.host);
+		data.Load(prefix + "firstseen", o.firstseen);
+		data.Load(prefix + "lastevent", o.lastevent);
+		data.Load(prefix + "age", o.age);
 	}
 
 	return rec;

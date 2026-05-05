@@ -695,49 +695,50 @@ public:
     }
 };
 
-class ApiAuthVerifierDataType final
-    : public Serialize::Type
+class ApiAuthVerifierDataType final : public Serialize::Type
 {
 public:
-    ApiAuthVerifierDataType(Module *owner)
-        : Serialize::Type(APIAUTH_VERIFIER_DATA_TYPE, owner)
-    {
-    }
+	ApiAuthVerifierDataType(Module *owner) : Serialize::Type("ApiAuthVerifier", owner) { }
 
-    void Serialize(Serializable *obj, Serialize::Data &data) const override
-    {
-        const auto *v = static_cast<const ApiAuthVerifierEntry *>(obj);
-        data.Store("account", v->account);
-        data.Store("scram_sha512_verifier", v->scram_sha512_verifier);
-        data.Store("scram_sha256_verifier", v->scram_sha256_verifier);
-    }
+	void Serialize(Serializable *obj, Serialize::Data &data) const override
+	{
+		ApiAuthVerifierEntry *v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
+		if (v)
+		{
+			data.Store("account", v->account);
+			data.Store("scram_sha512_verifier", v->scram_sha512_verifier);
+			data.Store("scram_sha256_verifier", v->scram_sha256_verifier);
+		}
+	}
 
-    Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
-    {
-        Anope::string account;
-        data["account"] >> account;
-        if (account.empty())
-            return nullptr;
+	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
+	{
+		Anope::string account;
+		data.Load("account", account);
 
-        ApiAuthVerifierEntry *v = nullptr;
-        if (obj)
-        {
-            v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
-            if (!v)
-                return nullptr;
-        }
-        else
-        {
-            v = ApiAuthVerifierEntry::Find(account);
-            if (!v)
-                v = new ApiAuthVerifierEntry(account);
-        }
+		if (account.empty())
+			return nullptr;
 
-        v->SetAccount(account);
-        data["scram_sha512_verifier"] >> v->scram_sha512_verifier;
-        data["scram_sha256_verifier"] >> v->scram_sha256_verifier;
-        return v;
-    }
+		ApiAuthVerifierEntry *v = nullptr;
+		if (obj)
+		{
+			v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
+			if (!v)
+				return nullptr;
+		}
+		else
+		{
+			v = ApiAuthVerifierEntry::Find(account);
+			if (!v)
+				v = new ApiAuthVerifierEntry(account);
+		}
+
+		v->account = account;
+		data.Load("scram_sha512_verifier", v->scram_sha512_verifier);
+		data.Load("scram_sha256_verifier", v->scram_sha256_verifier);
+
+		return v;
+	}
 };
 
 class ApiAuthScramSHA512 final

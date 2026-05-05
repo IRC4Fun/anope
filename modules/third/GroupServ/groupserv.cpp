@@ -191,10 +191,9 @@ namespace
 		Serializable* Unserialize(Serializable* obj, Serialize::Data& data) const override
 		{
 			Anope::string sci, sgroup, sonly;
-			data["ci"] >> sci;
-			data["group"] >> sgroup;
-			data["group_only"] >> sonly;
-
+			data.Load("ci", sci);
+			data.Load("group", sgroup);
+			data.Load("group_only", sonly);
 			ChannelInfo* ci = ChannelInfo::Find(sci);
 			if (!ci)
 				return nullptr;
@@ -604,14 +603,24 @@ class CommandGroupServVHost final
 			return false;
 		}
 
-		BotInfo* bi = nullptr;
+		BotInfo *bi = NULL;
 		Anope::string cmdname;
-		if (!Command::FindCommandFromService("hostserv/request", bi, cmdname) || !bi)
+
+		// Manually resolve the service "hostserv/request"
+		ServiceReference<Command> hsr("Command", "hostserv/request");
+		if (hsr)
+		{
+			// Find which bot is assigned to the "HostServ" service
+			bi = Config->GetClient("HostServ");
+			// The name used to call the command (usually "REQUEST")
+			cmdname = hsr->name;
+		}
+
+		if (!hsr || !bi)
 		{
 			this->gs.Reply(source, "HostServ is not available.");
 			return false;
 		}
-
 		CommandInfo* info = bi->GetCommand(cmdname);
 		if (!info)
 		{

@@ -50,17 +50,16 @@ struct ChanTrapInfo : Serializable
 	~ChanTrapInfo();
 
 	void Serialize(Serialize::Data &data) const
-	{
-		data["mask"] << this->mask;
-		data["modes"] << this->modes;
-		data["bots"] << this->bots;
-		data["action"] << this->action;
-		data["duration"] << this->duration;
-		data["creator"] << this->creator;
-		data["reason"] << this->reason;
-		data["created"] << this->created;
-	}
-
+		{
+			data.Store("mask", this->mask);
+			data.Store("modes", this->modes);
+			data.Store("bots", this->bots);
+			data.Store("action", this->action);
+			data.Store("duration", this->duration);
+			data.Store("creator", this->creator);
+			data.Store("reason", this->reason);
+			data.Store("created", this->created);
+		}
 	static Serializable* Unserialize(Serializable *obj, Serialize::Data &data);
 };
 
@@ -317,19 +316,28 @@ Serializable* ChanTrapInfo::Unserialize(Serializable *obj, Serialize::Data &data
 	else
 		ct = new ChanTrapInfo;
 
-	data["mask"] >> ct->mask;
-	data["modes"] >> ct->modes;
-	data["bots"] >> ct->bots;
-	data["duration"] >> ct->duration;
-	data["creator"] >> ct->creator;
-	data["reason"] >> ct->reason;
-	data["created"] >> ct->created;
-	unsigned int a;
-	data["action"] >> a;
-	ct->action = static_cast<ChanTrapAction>(a);
+	/* Using direct Load calls for all data members */
+	data.Load("mask", ct->mask);
+	data.Load("modes", ct->modes);
+	data.Load("bots", ct->bots);
+	data.Load("duration", ct->duration);
+	data.Load("creator", ct->creator);
+	data.Load("reason", ct->reason);
+	data.Load("created", ct->created);
 
-	if (a > CTA_SIZE)
-		return NULL;
+	Anope::string a;
+	data.Load("action", a);
+
+	/* 
+	 * Convert the text 'a' into a number so we can assign it to the enum.
+	 * We then cast it to (0) if it's out of bounds to ensure the module 
+	 * doesn't crash on invalid data.
+	 */
+	int action_num = Anope::Convert<int>(a, 0);  
+	ct->action = static_cast<ChanTrapAction>(action_num);
+
+	if (action_num >= CTA_SIZE)
+		ct->action = static_cast<ChanTrapAction>(0);
 
 	if (!obj)
 		ChanTrapList.Add(ct);
@@ -1020,18 +1028,19 @@ struct ChanTrapInfoType final
 
 	void Serialize(Serializable *obj, Serialize::Data &data) const override
 	{
-		const auto *ct = static_cast<const ChanTrapInfo *>(obj);
-
-		data["mask"] << ct->mask;
-		data["modes"] << ct->modes;
-		data["bots"] << ct->bots;
-		data["action"] << ct->action;
-		data["duration"] << ct->duration;
-		data["creator"] << ct->creator;
-		data["reason"] << ct->reason;
-		data["created"] << ct->created;
+		ChanTrapInfo *ct = dynamic_cast<ChanTrapInfo *>(obj);
+		if (ct)
+		{
+			data.Store("mask", ct->mask);
+			data.Store("modes", ct->modes);
+			data.Store("bots", ct->bots);
+			data.Store("action", ct->action);
+			data.Store("duration", ct->duration);
+			data.Store("creator", ct->creator);
+			data.Store("reason", ct->reason);
+			data.Store("created", ct->created);
+		}
 	}
-
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
 	{
 		return ChanTrapInfo::Unserialize(obj, data);

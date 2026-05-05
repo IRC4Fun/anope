@@ -43,10 +43,10 @@ struct TopicHistoryEntry : Serializable
 
 	void Serialize(Serialize::Data &data) const
 	{
-		data["chan"] << this->chan;
-		data["topic"] << this->topic;
-		data["setter"] << this->setter;
-		data["when"] << this->when;
+		data.Store("chan", this->chan);
+		data.Store("topic", this->topic);
+		data.Store("setter", this->setter);
+		data.Store("when", this->when);
 	}
 
 	static Serializable* Unserialize(Serializable *obj, Serialize::Data &data);
@@ -82,33 +82,38 @@ TopicHistoryEntry::~TopicHistoryEntry()
 
 Serializable* TopicHistoryEntry::Unserialize(Serializable *obj, Serialize::Data &data)
 {
-	Anope::string schan, stopic, ssetter;
-	time_t swhen;
+    Anope::string schan, stopic, ssetter;
+    time_t swhen = 0;
 
-	data["chan"] >> schan;
+    // Use .Load instead of [] >>
+    data.Load("chan", schan);
 
-	ChannelInfo *ci = ChannelInfo::Find(schan);
-	if (!ci)
-		return NULL;
+    ChannelInfo *ci = ChannelInfo::Find(schan);
+    if (!ci)
+        return NULL;
 
-	if (obj)
-	{
-		TopicHistoryEntry *entry = anope_dynamic_static_cast<TopicHistoryEntry *>(obj);
-		entry->chan = ci->name;
-		data["topic"] >> entry->topic;
-		data["setter"] >> entry->setter;
-		data["when"] >> entry->when;
-		return entry;
-	}
+    if (obj)
+    {
+        TopicHistoryEntry *entry = anope_dynamic_static_cast<TopicHistoryEntry *>(obj);
+        entry->chan = ci->name;
+        
+        // Use .Load for existing objects
+        data.Load("topic", entry->topic);
+        data.Load("setter", entry->setter);
+        data.Load("when", entry->when);
+        return entry;
+    }
 
-	data["topic"] >> stopic;
-	data["setter"] >> ssetter;
-	data["when"] >> swhen;
-	TopicHistoryEntry *entry = new TopicHistoryEntry(ci, stopic, ssetter, swhen);
+    // Use .Load for variables used to create new objects
+    data.Load("topic", stopic);
+    data.Load("setter", ssetter);
+    data.Load("when", swhen);
+    
+    TopicHistoryEntry *entry = new TopicHistoryEntry(ci, stopic, ssetter, swhen);
 
-	TopicHistoryList *entries = ci->Require<TopicHistoryList>("topichistorylist");
-	(*entries)->insert((*entries)->begin(), entry);
-	return entry;
+    TopicHistoryList *entries = ci->Require<TopicHistoryList>("topichistorylist");
+    (*entries)->insert((*entries)->begin(), entry);
+    return entry;
 }
 
 struct TopicHistoryEntryType final
@@ -123,10 +128,10 @@ struct TopicHistoryEntryType final
 	{
 		const auto *entry = static_cast<const TopicHistoryEntry *>(obj);
 
-		data["chan"] << entry->chan;
-		data["topic"] << entry->topic;
-		data["setter"] << entry->setter;
-		data["when"] << entry->when;
+		data.Store("chan", entry->chan);
+		data.Store("topic", entry->topic);
+		data.Store("setter", entry->setter);
+		data.Store("when", entry->when);
 	}
 
 	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
@@ -395,29 +400,38 @@ class CommandCSSetTopicHistory : public Command
 			this->OnSyntaxError(source, "TOPICHISTORY");
 	}
 
-	bool OnHelp(CommandSource &source, const Anope::string &) override
-	{
-		this->SendSyntax(source);
-		source.Reply(" ");
-		source.Reply("Enables or disables a history of channel topics.");
-		source.Reply(" ");
-		source.Reply("The \002ON\002 command enables the option.");
-		source.Reply(" ");
-		source.Reply("The \002OFF\002 command clears the list and disables the option.");
-		source.Reply(" ");
-		source.Reply("There is a maximum Topic History list size of %d topics.", maxhistory);
-		source.Reply(" ");
+bool OnHelp(CommandSource &source, const Anope::string &) override
+    {
+        this->SendSyntax(source);
+        source.Reply(" ");
+        source.Reply("Enables or disables a history of channel topics.");
+        source.Reply(" ");
+        source.Reply("The \002ON\002 command enables the option.");
+        source.Reply(" ");
+        source.Reply("The \002OFF\002 command clears the list and disables the option.");
+        source.Reply(" ");
+        source.Reply("There is a maximum Topic History list size of %d topics.", maxhistory);
+        source.Reply(" ");
 
-		/* Look up and display the proper Bot nick and Command name for using this option */
-		Anope::string cmd;
-		BotInfo *bi;
-		if (Command::FindCommandFromService("chanserv/topichistory", bi, cmd))
-			source.Reply("See the help for %s %s on how to use this option.", bi->nick.c_str(), cmd.c_str());
-		else
-			source.Reply("The required \037chanserv/topichistory\037 command is not enabled, this option is useless.");
+        /* Find the bot assigned to ChanServ */
+        BotInfo *bi = Config->GetClient("ChanServ");
+        if (bi)
+        {
+            /* Look up the command info */
+            CommandInfo *cinfo = bi->GetCommand("chanserv/topichistory");
+            if (cinfo)
+            {
+                /* cinfo->name is the string we need for the Reply */
+                source.Reply("See the help for %s %s on how to use this option.", bi->nick.c_str(), cinfo->name.c_str());
+            }
+            else
+            {
+                source.Reply("The required \037chanserv/topichistory\037 command is not enabled, this option is useless.");
+            }
+        }
 
-		return true;
-	}
+        return true;
+    }
 };
 
 class CSTopicHistory : public Module
