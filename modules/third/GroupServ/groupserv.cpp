@@ -191,10 +191,9 @@ namespace
 		Serializable* Unserialize(Serializable* obj, Serialize::Data& data) const override
 		{
 			Anope::string sci, sgroup, sonly;
-			data.TryLoad("ci", sci);
-			data.TryLoad("group", sgroup);
-			data.TryLoad("group_only", sonly);
-
+			data.Load("ci", sci);
+			data.Load("group", sgroup);
+			data.Load("group_only", sonly);
 			ChannelInfo* ci = ChannelInfo::Find(sci);
 			if (!ci)
 				return nullptr;
@@ -281,7 +280,7 @@ public:
 		if (auto* cur = this->item.Get(ci))
 			only = cur->group_only;
 		else
-			only = true; // default to enforcement when a group is set
+			only = this->gs.GetDefaultGroupOnly(); // configurable default for new GROUP associations
 
 		this->item.Set(ci, GSChanAccessData(ci, val, only));
 		Log(source.AccessFor(ci).HasPriv("SET") ? LOG_COMMAND : LOG_OVERRIDE, source, this, ci) << "to set GROUP to " << val;
@@ -604,14 +603,24 @@ class CommandGroupServVHost final
 			return false;
 		}
 
-		BotInfo* bi = nullptr;
+		BotInfo *bi = NULL;
 		Anope::string cmdname;
-		if (!Command::FindFromService("hostserv/request", bi, cmdname) || !bi)
+
+		// Manually resolve the service "hostserv/request"
+		ServiceReference<Command> hsr("Command", "hostserv/request");
+		if (hsr)
+		{
+			// Find which bot is assigned to the "HostServ" service
+			bi = Config->GetClient("HostServ");
+			// The name used to call the command (usually "REQUEST")
+			cmdname = hsr->name;
+		}
+
+		if (!hsr || !bi)
 		{
 			this->gs.Reply(source, "HostServ is not available.");
 			return false;
 		}
-
 		CommandInfo* info = bi->GetCommand(cmdname);
 		if (!info)
 		{
@@ -1059,15 +1068,14 @@ class GroupServTimer final
 
 public:
 	GroupServTimer(Module* owner, GroupServCore& core, time_t seconds)
-		: Timer(owner, seconds)
+		: Timer(owner, seconds, true)
 		, gs(core)
 	{
 	}
 
-	bool Tick() override
+	void Tick() override
 	{
 		this->gs.SaveDB();
-		return true;
 	}
 };
 

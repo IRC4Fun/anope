@@ -188,6 +188,7 @@ public:
 
 	bool SetOption(CommandSource& source, const Anope::string& groupname, const Anope::string& setting, const Anope::string& value);
 	bool SetGroupFlag(CommandSource& source, const Anope::string& groupname, GSGroupFlags flag, bool enabled);
+	bool GetDefaultGroupOnly() const { return this->default_group_only; }
 
 	bool GetGroupVHost(const Anope::string& groupname, Anope::string& out) const;
 	bool GetGroupFlags(const Anope::string& groupname, GSGroupFlags& out) const;
@@ -216,6 +217,7 @@ private:
 	bool opers_only = false;
 	GSAccessFlags default_joinflags = GSAccessFlags::NONE;
 	bool default_vhostauto = false;
+	bool default_group_only = false;
 	
 	time_t save_interval = 600;
 

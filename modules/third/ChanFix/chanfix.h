@@ -129,8 +129,6 @@ private:
 	time_t autofix_interval = 60;
 	unsigned int expire_divisor = 672;
 
-	char op_status_char = 'o';
-
 	Anope::string admin_priv = "chanfix/admin";
 	Anope::string auspex_priv = "chanfix/auspex";
 
