@@ -1117,7 +1117,7 @@ class OSNotify : public Module
 		}
 
 		/* Also support multiple exclude blocks: exclude { mask = "..." } */
-		for (int i = 0; i < modconf.CountBlock("exclude"); ++i)
+		for (size_t i = 0; i < modconf.CountBlock("exclude"); ++i)
 		{
 			const auto &blk = modconf.GetBlock("exclude", i);
 			const auto &mask = blk.Get<const Anope::string>("mask", "");
