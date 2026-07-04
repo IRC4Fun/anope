@@ -215,16 +215,17 @@ class WebServCore::WebServPollTimer final
 
 public:
 	WebServPollTimer(WebServCore& owner, time_t seconds)
-		: Timer(&owner, seconds, true)  /* repeating */
+		: Timer(&owner, seconds)  /* repeating */
 		, ws(owner)
 	{
 	}
 
-	void Tick() override
+	bool Tick() override
 	{
 		if (!Me || !Me->IsSynced())
-			return;
+			return false;  // Add return statement
 		this->ws.PollForNewRequests();
+		return true;  // Add return statement
 	}
 };
 
