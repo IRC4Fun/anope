@@ -83,16 +83,12 @@ public:
 	uint64_t notify_requests = 0;
 
 	// Per-topic usage counts
-        std::map<Anope::string, uint64_t> topic_requests;
-        
-        // Add these to satisfy the Unserialize/Serialize logic
-        std::map<Anope::string, uint64_t> topic_hits;
-        std::map<Anope::string, time_t> helpme_cooldowns;
-        std::map<Anope::string, time_t> request_cooldowns;
+	std::map<Anope::string, uint64_t> topic_requests;
 
-        HelpServState();
-        ~HelpServState() override;
+	HelpServState();
+	~HelpServState() override;
 };
+
 class HelpServTicketDataType final
 	: public Serialize::Type
 {

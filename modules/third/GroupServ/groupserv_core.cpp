@@ -1057,7 +1057,6 @@ void GroupServCore::OnReload(Configuration::Conf& conf)
 	this->enable_open_groups = mod->Get<bool>("enable_open_groups", "yes");
 	this->opers_only = mod->Get<bool>("opers_only", "no");
 	this->default_vhostauto = mod->Get<bool>("vhostauto_default", "no");
-	this->default_group_only = mod->Get<bool>("grouponly_default", "no");
 
 	this->default_joinflags = this->ParseFlags(mod->Get<Anope::string>("default_joinflags", ""), false, GSAccessFlags::NONE);
 	// Atheme default: JOIN grants no privileges unless joinflags are configured.
