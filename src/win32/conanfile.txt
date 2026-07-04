@@ -44,3 +44,30 @@ sqlite3/*:build_executable=False
 [generators]
 CMakeDeps
 CMakeToolchain
+# Last updated: 2026-05-16
+
+[requires]
+argon2/20190702
+libgettext/0.26
+libmysqlclient/8.1.0
+openssl/3.6.2
+pcre2/10.44
+sqlite3/3.53.1
+tre/cci.20230717
+
+[tool_requires]
+gettext/1.0
+
+[options]
+*/*:shared=True
+libiconv/*:shared=False # Shared libiconv causes linker errors
+openssl/*:no_apps=True
+openssl/*:no_legacy=True
+pcre2/*:build_pcre2_16=False
+pcre2/*:build_pcre2_32=False
+pcre2/*:build_pcre2grep=False
+sqlite3/*:build_executable=False
+
+[generators]
+CMakeDeps
+CMakeToolchain

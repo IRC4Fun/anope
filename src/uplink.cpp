@@ -29,7 +29,7 @@ public:
 	{
 	}
 
-	void Tick() override
+	bool Tick() override
 	{
 		try
 		{
@@ -39,6 +39,7 @@ public:
 		{
 			Log(LOG_TERMINAL) << "Unable to connect to uplink #" << (Anope::CurrentUplink + 1) << " (" << Config->Uplinks[Anope::CurrentUplink].str() << "): " << ex.GetReason();
 		}
+		return false;
 	}
 };
 
@@ -72,8 +73,11 @@ void Uplink::SendInternal(const Anope::map<Anope::string> &tags, const MessageSo
 		return;
 	}
 
+	Anope::map<Anope::string> fulltags(tags);
+	IRCD->PopulateTags(fulltags, source, command, params);
+
 	Anope::string message;
-	if (!IRCD->Format(message, tags, source, command, params))
+	if (!IRCD->Format(message, fulltags, source, command, params))
 		return;
 
 	UplinkSock->sent_msgs++;
@@ -82,13 +86,17 @@ void Uplink::SendInternal(const Anope::map<Anope::string> &tags, const MessageSo
 	Log(LOG_RAWIO) << "Sent " << message;
 	if (Anope::ProtocolDebug)
 	{
-		if (tags.empty())
-			Log() << "\tNo tags";
-		else
+		auto sent_tag = false;
+		for (const auto &[tname, tvalue] : fulltags)
 		{
-			for (const auto &[tname, tvalue] : tags)
+			if (IRCD->IsTagValid(tname, tvalue))
+			{
 				Log() << "\tTag " << tname << ": " << tvalue;
+				sent_tag = true;
+			}
 		}
+		if (!sent_tag)
+			Log() << "\tNo tags";
 
 		if (source.GetSource().empty())
 			Log() << "\tNo source";

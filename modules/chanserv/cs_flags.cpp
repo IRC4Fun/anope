@@ -14,7 +14,15 @@
 
 #include "module.h"
 
+#define FLAGS_MIGRATED_1        _("\002%s\002 has been migrated to the %s access system.")
+#define FLAGS_MIGRATED_N       N_("\002%u\002 entry has been migrated to the %s access system.", "\002%u\002 entries have been migrated to the %s access system.")
+#define FLAGS_NOT_MIGRATABLE_1  _("\002%s\002 can not be migrated to the %s access system because they have no migratable privileges.")
+#define FLAGS_NOT_MIGRATABLE_N N_("\002%u\002 entry can not be migrated to the %s access system because they have no migratable privileges.", "\002%u\002 entries can not be migrated to the %s access system because they have no migratable privileges.")
+#define FLAGS_NOT_MIGRATED_1    _("\002%s\002 can not be migrated to the %s access system because they have privileges that you do not.")
+#define FLAGS_NOT_MIGRATED_N   N_("\002%u\002 entry can not be migrated to the %s access system because they have privileges that you do not.", "\002%u\002 entries can not be migrated to the %s access system because they have privileges that you do not.")
+
 static std::map<Anope::string, char> defaultFlags;
+static Anope::map<Anope::string> migrationRequires;
 
 class FlagsChanAccess final
 	: public ChanAccess
@@ -75,6 +83,13 @@ public:
 	ChanAccess *Create() override
 	{
 		return new FlagsChanAccess(this);
+	}
+
+	void GetAccess(CommandSource& source, const Privilege *p, Anope::map<Anope::string> &access) override
+	{
+		auto it = defaultFlags.find(p->name);
+		if (it != defaultFlags.end())
+			access[_("Flag")] = Anope::ToString(it->second);
 	}
 };
 FlagsAccessProvider *FlagsAccessProvider::ap;
@@ -303,8 +318,8 @@ class CommandCSFlags final
 			return;
 		auto *access = anope_dynamic_static_cast<FlagsChanAccess *>(provider->Create());
 		access->SetMask(mask, ci);
-			access->creator = source.GetNick();
-		access->description = current ? current->description : description;
+		access->creator = source.GetNick();
+		access->description = current && description.empty() ? current->description : description;
 		access->last_seen = current ? current->last_seen : 0;
 		access->created = Anope::CurTime;
 		access->flags = current_flags;
@@ -411,10 +426,9 @@ class CommandCSFlags final
 	void DoMigrate(CommandSource &source, ChannelInfo *ci, const std::vector<Anope::string> &params)
 	{
 		auto override = false;
-		const auto source_access = source.AccessFor(ci);
 
-		unsigned migrated = 0, notmigrated = 0;
-		Anope::string migratedmask, notmigratedmask;
+		unsigned migrated = 0, notmigratable = 0, notmigrated = 0;
+		Anope::string migratedmask, notmigratablemask, notmigratedmask;
 		const auto &entry = params.size() > 2 ? params[2] : "*";
 		for (auto idx = ci->GetAccessCount(); idx > 0; --idx)
 		{
@@ -428,23 +442,40 @@ class CommandCSFlags final
 			std::set<char> newflags;
 			for (auto &[priv, flag] : defaultFlags)
 			{
-				if (access->HasPriv(priv))
+				if (!access->HasPriv(priv))
 					continue; // Source doesn't have this flag.
 
 				// Check that the source has access to set this entry.
+				const auto source_access = source.AccessFor(ci);
 				if (!override && !source_access.HasPriv(priv) && !source_access.founder)
 				{
 					if (!source.HasPriv("chanserv/access/modify"))
 					{
 						notmigrated++;
 						notmigratedmask = access->Mask();
+						Log(LOG_DEBUG) << source.GetNick() << " does not have the access to migrate " << access->Mask() << " to flags";
 						continue; // No privs
 					}
 
 					override = true;
 				}
 
+				auto req = migrationRequires.find(priv);
+				if (req != migrationRequires.end() && !access->HasPriv(req->second))
+				{
+					Log(LOG_DEBUG) << access->Mask() << " has " << priv << " but not " << req->second << " so it will be lost on migration to flags";
+					continue; // Required flag missing.
+				}
+
 				newflags.insert(flag);
+			}
+
+			if (newflags.empty())
+			{
+				notmigratable++;
+				notmigratablemask = access->Mask();
+				Log(LOG_DEBUG) << access->Mask() << " has " << access->AccessSerialize() << " that can not be migrated to flags";
+				continue; // No privs that are migratable
 			}
 
 			migrated++;
@@ -452,10 +483,11 @@ class CommandCSFlags final
 
 			auto *newaccess = anope_dynamic_static_cast<FlagsChanAccess *>(FlagsAccessProvider::ap->Create());
 			newaccess->SetMask(access->Mask(), ci);
+			newaccess->created = access->created;
 			newaccess->creator = access->creator;
 			newaccess->description = access->description;
-			newaccess->created = access->created;
 			newaccess->flags = newflags;
+			newaccess->last_seen = access->last_seen;
 
 			ci->EraseAccess(idx - 1);
 			FOREACH_MOD(OnAccessDel, (ci, source, access, true));
@@ -468,18 +500,23 @@ class CommandCSFlags final
 		if (migrated == 1)
 		{
 			Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to migrate " << migratedmask;
-			source.Reply(CHAN_ACCESS_MIGRATED_1, migratedmask.c_str(), source.command.nobreak().c_str());
+			source.Reply(FLAGS_MIGRATED_1, migratedmask.c_str(), source.command.nobreak().c_str());
 		}
 		else if (migrated > 1)
 		{
 			Log(override ? LOG_OVERRIDE : LOG_COMMAND, source, this, ci) << "to migrate " << migrated << " access entries";
-			source.Reply(migrated, CHAN_ACCESS_MIGRATED_N, migrated, source.command.nobreak().c_str());
+			source.Reply(migrated, FLAGS_MIGRATED_N, migrated, source.command.nobreak().c_str());
 		}
 
+		if (notmigratable == 1)
+			source.Reply(FLAGS_NOT_MIGRATABLE_1, notmigratablemask.c_str(), source.command.nobreak().c_str());
+		else if (notmigratable > 1)
+			source.Reply(notmigratable, FLAGS_NOT_MIGRATABLE_N, notmigratable, source.command.nobreak().c_str());
+
 		if (notmigrated == 1)
-			source.Reply(CHAN_ACCESS_NOT_MIGRATED_1, notmigratedmask.c_str(), source.command.nobreak().c_str());
+			source.Reply(FLAGS_NOT_MIGRATED_1, notmigratedmask.c_str(), source.command.nobreak().c_str());
 		else if (notmigrated > 1)
-			source.Reply(migrated, CHAN_ACCESS_NOT_MIGRATED_N, notmigrated, source.command.nobreak().c_str());
+			source.Reply(notmigrated, FLAGS_NOT_MIGRATED_N, notmigrated, source.command.nobreak().c_str());
 	}
 
 	void DoClear(CommandSource &source, ChannelInfo *ci)
@@ -624,10 +661,8 @@ public:
 	{
 		defaultFlags.clear();
 
-		for (int i = 0; i < conf.CountBlock("privilege"); ++i)
+		for (const auto &[_,  priv] : conf.GetBlocks("privilege"))
 		{
-			const auto &priv = conf.GetBlock("privilege", i);
-
 			const Anope::string &pname = priv.Get<const Anope::string>("name");
 
 			Privilege *p = PrivilegeManager::FindPrivilege(pname);
@@ -637,6 +672,10 @@ public:
 			const Anope::string &value = priv.Get<const Anope::string>("flag");
 			if (value.empty())
 				continue;
+
+			const auto &migration_requires = priv.Get<const Anope::string>("flag_migration_requires");
+			if (!migration_requires.empty())
+				migrationRequires[p->name] = migration_requires;
 
 			defaultFlags[p->name] = value[0];
 		}

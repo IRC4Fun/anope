@@ -218,11 +218,11 @@ class ModuleProxyScan final
 	{
 	public:
 		ConnectionTimeout(Module *c, time_t timeout)
-			: Timer(c, timeout, true)
+			: Timer(c, timeout)
 		{
 		}
 
-		void Tick() override
+		bool Tick() override
 		{
 			for (auto it = ProxyConnect::proxies.begin(), it_end = ProxyConnect::proxies.end(); it != it_end;)
 			{
@@ -232,6 +232,7 @@ class ModuleProxyScan final
 				if (p->created + this->GetSecs() < Anope::CurTime)
 					delete p;
 			}
+			return true;
 		}
 	} connectionTimeout;
 
@@ -308,9 +309,9 @@ public:
 		}
 
 		this->proxyscans.clear();
-		for (int i = 0; i < config.CountBlock("proxyscan"); ++i)
+
+		for (const auto &[_, block] : config.GetBlocks("proxyscan"))
 		{
-			const auto &block = config.GetBlock("proxyscan", i);
 			ProxyCheck p;
 			Anope::string token;
 

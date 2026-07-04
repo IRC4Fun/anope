@@ -298,12 +298,12 @@ public:
 	MyHTTPProvider(Module *c, const Anope::string &n, const Anope::string &i, const unsigned short p, const int t, bool s)
 		: Socket(-1, i.find(':') == Anope::string::npos ? AF_INET : AF_INET6)
 		, HTTP::Provider(c, n, i, p, s)
-		, Timer(c, 10, true)
+		, Timer(c, 10)
 		, timeout(t)
 	{
 	}
 
-	void Tick() override
+	bool Tick() override
 	{
 		while (!this->clients.empty())
 		{
@@ -314,6 +314,7 @@ public:
 			delete c;
 			this->clients.pop_front();
 		}
+		return true;
 	}
 
 	ClientSocket *OnAccept(int fd, const sockaddrs &addr) override
@@ -371,11 +372,8 @@ public:
 		const auto &conf = config.GetModule(this);
 		std::set<Anope::string> existing;
 
-		for (int i = 0; i < conf.CountBlock("httpd"); ++i)
+		for (const auto &[_, block] : conf.GetBlocks("httpd"))
 		{
-			const auto &block = conf.GetBlock("httpd", i);
-
-
 			const Anope::string &hname = block.Get<const Anope::string>("name", "httpd/main");
 			existing.insert(hname);
 

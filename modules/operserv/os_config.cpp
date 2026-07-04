@@ -61,7 +61,7 @@ public:
 			for (unsigned i = 0; !show_blocks[i].empty(); ++i)
 			{
 				const auto &block = Config->GetBlock(show_blocks[i]);
-				const Configuration::Block::item_map &items = block.GetItems();
+				const auto &items = block.GetItems();
 
 				ListFormatter lflist(source.GetAccount());
 				lflist.AddColumn(_("Name")).AddColumn(_("Value"));
@@ -84,10 +84,9 @@ public:
 			lflist.AddColumn(_("Module Name")).AddColumn(_("Name")).AddColumn(_("Value"));
 			lflist.SetFlexible(_("\002{}{module_name}}:{name}\002 = {value}"));
 
-			for (int i = 0; i < Config->CountBlock("module"); ++i)
+			for (const auto &[_,  block] : Config->GetBlocks("module"))
 			{
-				const auto &block = Config->GetBlock("module", i);
-				const Configuration::Block::item_map &items = block.GetItems();
+				const auto &items = block.GetItems();
 
 				if (items.size() <= 1)
 					continue;

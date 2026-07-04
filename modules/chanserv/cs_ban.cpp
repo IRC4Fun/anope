@@ -53,7 +53,7 @@ public:
 			&& bmask == this->mask;
 	}
 
-	void Tick() override
+	bool Tick() override
 	{
 		// We need to do this to prevent the remove-on-unban logic from double
 		// deleting the timer.
@@ -62,6 +62,8 @@ public:
 		Channel *c = Channel::Find(this->channel);
 		if (c)
 			c->RemoveMode(NULL, mode, this->mask);
+
+		return false;
 	}
 };
 
@@ -270,11 +272,12 @@ public:
 		source.Reply(_(
 			"Bans a given nick or mask on a channel. An optional expiry may "
 			"be given to cause services to remove the ban after a set amount "
-			"of time."
-			"\n\n"
-			"By default, limited to AOPs or those with level 5 access "
-			"and above on the channel. Channel founders may ban masks."
+			"of time. Channel founders may ban masks."
 		));
+
+		source.Reply(" ");
+		AccessProvider::SendAccess(source, "BAN");
+
 		return true;
 	}
 };

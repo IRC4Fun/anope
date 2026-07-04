@@ -686,7 +686,9 @@ Anope::string Anope::strftime(time_t t, const NickCore *nc, bool short_output)
 	}
 
 	char buf[256];
-	strftime(buf, sizeof(buf), "%c", (nc ? localtime(&t) : gmtime(&t)));
+	const auto *ts = nc ? localtime(&t) : gmtime(&t);
+	if (!ts || !strftime(buf, sizeof(buf), "%c", ts))
+		snprintf(buf, sizeof(buf), "(invalid timestamp)");
 
 	if (nc)
 	{
@@ -950,9 +952,9 @@ Anope::string Anope::VersionShort()
 Anope::string Anope::VersionBuildString()
 {
 #if REPRODUCIBLE_BUILD
-	Anope::string s = "build #" + Anope::ToString(BUILD);
+	auto s = Anope::Format("build #%u", BUILD);
 #else
-	Anope::string s = "build #" + Anope::ToString(BUILD) + ", compiled " + Anope::compiled;
+	auto s = Anope::Format("build #%u, compiled %s", BUILD, BUILD_DATE);
 #endif
 	Anope::string flags;
 
@@ -963,7 +965,7 @@ Anope::string Anope::VersionBuildString()
 	flags += "G";
 #endif
 #if REPRODUCIBLE_BUILD
-	flags += "R"
+	flags += "R";
 #endif
 #ifdef _WIN32
 	flags += "W";
@@ -1175,6 +1177,24 @@ Anope::string Anope::FormatCTCP(const Anope::string &name, const Anope::string &
 
 	return Anope::Format("\1%s %s\1", name.c_str(), value.c_str());
 }
+
+Anope::string Anope::FormatISO8601(time_t ts, unsigned long long ms)
+{
+	static time_t last_ts = -1;
+	static unsigned long long last_ms = -1;
+	static Anope::string timestamp;
+	if (ts != last_ts || ms != last_ms)
+	{
+		last_ts = ts;
+		last_ms = ms;
+		char timebuf[32];
+		const auto *tm = gmtime(&ts);
+		strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", tm);
+		timestamp = Anope::Format("%s.%03lldZ", timebuf, ms);
+	}
+	return timestamp;
+}
+
 
 bool Anope::ParseCTCP(const Anope::string &text, Anope::string &name, Anope::string &body)
 {
