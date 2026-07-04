@@ -20,9 +20,11 @@ under the terms of the GNU General Public License.
 #include "serialize.h"
 #include "modules/encryption.h"
 #include "modules/nickserv/sasl.h"
+#include "modules/sasl_scram.h"
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <jwt-cpp/jwt.h>  // Added for JWT token decoding and verification
 
 #include <memory>
 #include <algorithm>
@@ -1551,17 +1553,29 @@ public:
             if (!response.access_token.empty()) {
                 try {
                     std::string token_str(response.access_token.c_str());
-#if defined(HAVE_JWT_CPP)
-                 try {
-                     std::string token_str(response.access_token.c_str());
-                     auto decoded = jwt::decode(token_str);
-                     // ... rest of JWT code ...
-                 } catch (const std::exception &ex) {
-                     Log(me, "api_auth") << "JWT decoding/verification failed: " << ex.what();
-                 }
-#else
-                 Log(LOG_DEBUG) << "[api_auth]: JWT support not compiled in; using account name directly";
-#endif
+                    auto decoded = jwt::decode(token_str);
+
+                    if (!this->jwt_secret.empty() && !this->jwt_issuer.empty())
+                    {
+                        std::string jwt_secret_str(this->jwt_secret.c_str());
+                        std::string expected_issuer(this->jwt_issuer.c_str());
+                        jwt::verify()
+                            .allow_algorithm(jwt::algorithm::hs256{jwt_secret_str})
+                            .with_issuer(expected_issuer)
+                            .verify(decoded);
+                    }
+                    else
+                    {
+                        Log(LOG_DEBUG) << "[api_auth]: JWT verification disabled (jwt_secret/jwt_issuer not configured)";
+                    }
+
+                    std::string subject = decoded.get_payload_claim("sub").as_string();
+                    if (!subject.empty())
+                        effective_account = subject.c_str();
+                } catch (const std::exception &ex) {
+                    Log(me, "api_auth") << "JWT decoding/verification failed: " << ex.what();
+                    // Fall back to req->GetAccount() if verification fails.
+                }
             }
             
             Log(LOG_COMMAND) << "[api_auth]: Using effective account: " << effective_account;
