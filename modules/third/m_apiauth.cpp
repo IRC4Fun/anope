@@ -28,6 +28,8 @@ under the terms of the GNU General Public License.
 
 #include <memory>
 #include <algorithm>
+#include <vector>
+#include <utility>
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -1344,6 +1346,50 @@ static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *use
     return size * nmemb;
 }
 
+// Synchronous form POST to the local Django bridge (localhost, sub-millisecond).
+// Returns the HTTP status code, or 0 on transport failure. Used for grouped-nick
+// validation/recording — same synchronous pattern as the auth request itself.
+static long ApiFormPost(const Anope::string &url, const Anope::string &apikey,
+                        const std::vector<std::pair<Anope::string, Anope::string>> &fields)
+{
+    CURL *curl = curl_easy_init();
+    if (!curl)
+        return 0;
+    std::string post;
+    for (const auto &kv : fields)
+    {
+        char *ek = curl_easy_escape(curl, kv.first.c_str(), 0);
+        char *ev = curl_easy_escape(curl, kv.second.c_str(), 0);
+        if (!post.empty())
+            post += "&";
+        post += std::string(ek ? ek : "") + "=" + std::string(ev ? ev : "");
+        if (ek) curl_free(ek);
+        if (ev) curl_free(ev);
+    }
+    std::string resp;
+    struct curl_slist *headers = nullptr;
+    if (!apikey.empty())
+    {
+        std::string h = "X-API-Key: " + std::string(apikey.c_str());
+        headers = curl_slist_append(headers, h.c_str());
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, post.c_str());
+    if (headers)
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 4L);
+    long code = 0;
+    if (curl_easy_perform(curl) == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+    if (headers)
+        curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return code;
+}
+
 // Structure to hold API response.
 struct APIAuthResponse
 {
@@ -1652,6 +1698,19 @@ public:
                 if (user && NickServ)
                     user->SendMessage(NickServ, _("E-mail set to \002%s\002."), response.email.c_str());
             }
+            // If the member logged in under a grouped (alias) nick, materialise it
+            // as a registered alias of the account so the nick is protected on IRC
+            // too. effective_account is the JWT sub (parent); req->GetAccount() is
+            // the name they authenticated as. login_token only resolves to the
+            // parent when that name is the account itself or a validated grouped
+            // nick, so a mismatch here means an already-vetted grouped nick.
+            if (na && na->nc && !req->GetAccount().equals_ci(effective_account)
+                && !NickAlias::Find(req->GetAccount())) {
+                NickAlias *ga = new NickAlias(req->GetAccount(), na->nc);
+                ga->registered = ga->last_seen = Anope::CurTime;
+                Log(LOG_COMMAND) << "[api_auth]: materialised grouped nick " << req->GetAccount()
+                                 << " -> " << na->nc->display;
+            }
             // Optionally, store the JWT token (response.access_token) for further usage.
             req->Success(me, na);
         } else {
@@ -1681,6 +1740,7 @@ class ModuleAPIAuth final : public Module {
     Anope::string jwt_issuer;
     Anope::string profile_url;
     Anope::string register_url;
+    Anope::string group_api_url;
 
     bool enable_sasl_scram_sha512 = false;
     bool enable_sasl_scram_sha256 = true;
@@ -1771,6 +1831,20 @@ public:
         curl_global_init(CURL_GLOBAL_ALL);
     }
     ~ModuleAPIAuth() {
+        // Delete every in-memory record on unload. ~ApiAuthVerifierEntry removes
+        // itself from ApiAuthVerifierList (and from Anope's global
+        // SerializableItems), so this must run while the module's code is still
+        // mapped -- otherwise the objects leak and leave dangling vtable pointers
+        // in the global serialization list.
+        while (!ApiAuthVerifierList->empty()) {
+            auto it = ApiAuthVerifierList->begin();
+            ApiAuthVerifierEntry *e = it->second;
+            if (!e) {
+                ApiAuthVerifierList->erase(it);
+                continue;
+            }
+            delete e;
+        }
         curl_global_cleanup();
     }
     void OnReload(Configuration::Conf &conf) override {
@@ -1790,6 +1864,7 @@ public:
         this->jwt_issuer = config.Get<const Anope::string>("jwt_issuer", "");
         this->profile_url = config.Get<const Anope::string>("profile_url", "https://www.example/accounts/profile/%s/"); // dynamic fetch
         this->register_url = config.Get<const Anope::string>("register_url", "https://www.example/accounts/register/");
+        this->group_api_url = config.Get<const Anope::string>("group_api_url", "");
 
         this->enable_sasl_scram_sha512 = config.Get<bool>("enable_sasl_scram_sha512", "no");
         this->enable_sasl_scram_sha256 = config.Get<bool>("enable_sasl_scram_sha256", "yes");
@@ -1869,7 +1944,21 @@ public:
             BroadcastSaslMechsIfSynced();
     }
     EventReturn OnPreCommand(CommandSource &source, Command *command, std::vector<Anope::string> &params) override {
-        if (!this->disable_reason.empty() && (command->name == "nickserv/register" || command->name == "nickserv/group")) {
+        // GROUP is allowed (unlike REGISTER), but the joining nick must be cleared
+        // with the website first: it can't be a name that is itself a registered
+        // account or already grouped onto someone else, which would shadow it.
+        if (command->name == "nickserv/group") {
+            if (!this->group_api_url.empty()) {
+                long code = ApiFormPost(this->group_api_url, this->api_key,
+                                        {{"action", "check"}, {"nick", source.GetNick()}});
+                if (code != 200) { // fail closed (reserved name, or website unreachable)
+                    source.Reply("Ce pseudo ne peut pas être groupé (il est réservé). Choisis-en un autre.");
+                    return EVENT_STOP;
+                }
+            }
+            return EVENT_CONTINUE;
+        }
+        if (!this->disable_reason.empty() && command->name == "nickserv/register") {
             Anope::string formatted_reason = this->disable_reason;
             if (formatted_reason.find("%s") != Anope::string::npos)
                 formatted_reason = formatted_reason.replace_all_cs("%s", this->register_url);
@@ -1894,6 +1983,17 @@ public:
             return EVENT_STOP;
         }
         return EVENT_CONTINUE;
+    }
+    // A nick was just grouped onto an account — record it on the website so logins
+    // as that nick resolve to the parent account and the name reads as taken.
+    void OnNickGroup(User *u, NickAlias *target) override {
+        if (this->group_api_url.empty() || !u || !target || !target->nc)
+            return;
+        long code = ApiFormPost(this->group_api_url, this->api_key,
+                                {{"action", "add"}, {"nick", u->nick}, {"account", target->nc->display}});
+        if (code != 200)
+            Log(LOG_COMMAND) << "[api_auth]: grouped_nick add failed for " << u->nick
+                             << " -> " << target->nc->display << " (HTTP " << code << ")";
     }
     void OnCheckAuthentication(User *u, IdentifyRequest *req) override {
         Log(LOG_COMMAND) << "[api_auth]: 🔎 Checking authentication for " << req->GetAccount();
