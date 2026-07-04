@@ -15,24 +15,8 @@
 /// END CMAKE
 
 #include "module.h"
+#include <jwt-cpp/jwt.h>
 #include <openssl/evp.h>
-
-#ifndef NSOAUTH_HAS_JWTCPP
-# if defined(__has_include)
-#  if __has_include(<jwt-cpp/jwt.h>)
-#   define NSOAUTH_HAS_JWTCPP 1
-#  else
-#   define NSOAUTH_HAS_JWTCPP 0
-#  endif
-# else
-#  define NSOAUTH_HAS_JWTCPP 0
-# endif
-#endif
-
-#if NSOAUTH_HAS_JWTCPP
-# include <jwt-cpp/jwt.h>
-#endif
-
 
 static Module *me;
 
@@ -46,7 +30,7 @@ public:
         : Command(creator, "nickserv/identifyoauth", 2, 2)
     {
         this->SetDesc(_("Identify to services using an OAuth/JWT token"));
-        this->SetSyntax(_("37nickname37 37token37"));
+        this->SetSyntax(_("\037nickname\037 \037token\037"));
         this->AllowUnregistered(true);
     }
 
@@ -54,9 +38,6 @@ public:
     {
         const Anope::string &username = params[0];
         const Anope::string &token = params[1];
-#if !NSOAUTH_HAS_JWTCPP
-        (void)token;
-#endif
 
         User *u = source.GetUser();
         BotInfo *bi = Config->GetClient("NickServ");
@@ -94,7 +75,6 @@ public:
         }
 
         // Validate JWT token
-#if NSOAUTH_HAS_JWTCPP
         try
         {
             std::string token_str(token.c_str());
@@ -110,18 +90,10 @@ public:
             // Verify token signature and issuer if configured
             if (!this->jwt_secret.empty())
             {
-                std::string b64_secret(this->jwt_secret.c_str());
-                std::string secret_str = jwt::base::decode<jwt::alphabet::base64>(b64_secret);
+                std::string secret_str(this->jwt_secret.c_str());
                 std::string expected_issuer(this->jwt_issuer.c_str());
 
-                if (secret_str.empty())
-                {
-                    Log(me, "oauth") << "Base64 decoding of jwt_secret failed. Check configuration.";
-                    source.Reply(_("Server configuration error for OAuth."));
-                    return;
-                }
-
-                Log(me, "oauth") << "Verifying with decoded secret length: " << secret_str.length() 
+                Log(me, "oauth") << "Verifying with secret length: " << secret_str.length() 
                                  << " expected issuer: " << expected_issuer;
 
                 auto verifier = jwt::verify()
@@ -208,25 +180,9 @@ public:
         }
         catch (const jwt::error::token_verification_exception &e)
         {
-            // Check if it's an expiration error based on the message
-            std::string error_msg = e.what();
-            if (error_msg.find("expired") != std::string::npos)
-            {
-                source.Reply(_("OAuth token has expired. Please obtain a new token from the website."));
-                Log(me, "oauth") << u->GetMask() << " used expired OAuth token for \002" << username << "\002";
-            }
-            else if (error_msg.find("signature") != std::string::npos)
-            {
-                source.Reply(_("OAuth token signature verification failed."));
-                Log(me, "oauth") << u->GetMask() << " failed OAuth signature verification for \002" << username 
-                                 << "\002: " << e.what();
-            }
-            else
-            {
-                source.Reply(_("Invalid or malformed OAuth token."));
-                Log(me, "oauth") << u->GetMask() << " failed JWT verification for \002" << username 
-                                 << "\002: " << e.what();
-            }
+            source.Reply(_("Invalid or malformed OAuth token."));
+            Log(me, "oauth") << u->GetMask() << " failed JWT verification for \002" << username 
+                             << "\002: " << e.what();
             u->BadPassword();
         }
         catch (const std::exception &e)
@@ -236,12 +192,6 @@ public:
                              << "\002: " << e.what();
             u->BadPassword();
         }
-#else
-        // jwt-cpp is not available at compile time
-        source.Reply(_("OAuth authentication is not available (server not compiled with JWT support)."));
-        Log(me, "oauth") << u->GetMask() << " tried to use IDENTIFYOAUTH but JWT support is not compiled in";
-        u->BadPassword();
-#endif
     }
 
     bool OnHelp(CommandSource &source, const Anope::string &subcommand) override

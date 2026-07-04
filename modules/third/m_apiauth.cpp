@@ -20,26 +20,14 @@ under the terms of the GNU General Public License.
 #include "serialize.h"
 #include "modules/encryption.h"
 #include "modules/nickserv/sasl.h"
-#include "sasl_scram.h"
+#include "modules/sasl_scram.h"
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
-
-#if defined(__has_include)
-# if __has_include(<jwt-cpp/jwt.h>)
-#  include <jwt-cpp/jwt.h>
-#  define APIAUTH_HAS_JWTCPP 1
-# else
-#  define APIAUTH_HAS_JWTCPP 0
-# endif
-#else
-# define APIAUTH_HAS_JWTCPP 0
-#endif
+#include <jwt-cpp/jwt.h>  // Added for JWT token decoding and verification
 
 #include <memory>
 #include <algorithm>
-#include <fstream>
-#include <filesystem>
 
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -598,38 +586,6 @@ namespace
         out = out.substr(0, start) + "<redacted>" + out.substr(end);
         return out;
     }
-
-    Anope::string NormalizeReplyLine(Anope::string text)
-    {
-        text = text.replace_all_cs("\r", " ");
-        text = text.replace_all_cs("\n", " ");
-
-        while (text.find("  ") != Anope::string::npos)
-            text = text.replace_all_cs("  ", " ");
-
-        while (!text.empty() && (text[0] == ' ' || text[0] == '\t'))
-            text.erase(0, 1);
-        while (!text.empty() && (text[text.length() - 1] == ' ' || text[text.length() - 1] == '\t'))
-            text.erase(text.length() - 1);
-
-        return text;
-    }
-
-    // Generate a random UUID v4 (RFC 4122) for webhook event_id deduplication.
-    Anope::string GenerateUUID()
-    {
-        unsigned char b[16];
-        if (RAND_bytes(b, sizeof(b)) != 1)
-            return "00000000-0000-4000-8000-000000000000";
-        b[6] = static_cast<unsigned char>((b[6] & 0x0f) | 0x40); // version 4
-        b[8] = static_cast<unsigned char>((b[8] & 0x3f) | 0x80); // variant RFC4122
-        char buf[37];
-        snprintf(buf, sizeof(buf),
-            "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
-        return Anope::string(buf);
-    }
 }
 
 // ── Serializable database for SCRAM verifiers (persisted to m_apiauth.module.json) ──
@@ -638,7 +594,7 @@ static constexpr const char *APIAUTH_VERIFIER_DATA_TYPE = "ApiAuthVerifier";
 
 class ApiAuthVerifierEntry;
 using apiauth_verifier_map = Anope::unordered_map<ApiAuthVerifierEntry *>;
-static apiauth_verifier_map ApiAuthVerifierList;
+static Serialize::Checker<apiauth_verifier_map> ApiAuthVerifierList(APIAUTH_VERIFIER_DATA_TYPE);
 
 class ApiAuthVerifierEntry final
     : public Serializable
@@ -652,36 +608,18 @@ public:
         : Serializable(APIAUTH_VERIFIER_DATA_TYPE)
         , account(acct)
     {
-        ApiAuthVerifierList.insert_or_assign(acct, this);
+        ApiAuthVerifierList->insert_or_assign(acct, this);
     }
 
     ~ApiAuthVerifierEntry() override
     {
-        auto it = ApiAuthVerifierList.find(this->account);
-        if (it != ApiAuthVerifierList.end() && it->second == this)
-            ApiAuthVerifierList.erase(it);
-    }
-
-    void SetAccount(const Anope::string &acct)
-    {
-        if (this->account.equals_ci(acct))
-        {
-            this->account = acct;
-            return;
-        }
-
-        auto old = ApiAuthVerifierList.find(this->account);
-        if (old != ApiAuthVerifierList.end() && old->second == this)
-            ApiAuthVerifierList.erase(old);
-
-        this->account = acct;
-        ApiAuthVerifierList.insert_or_assign(this->account, this);
+        ApiAuthVerifierList->erase(this->account);
     }
 
     static ApiAuthVerifierEntry *Find(const Anope::string &acct)
     {
-        auto it = ApiAuthVerifierList.find(acct);
-        if (it != ApiAuthVerifierList.end())
+        auto it = ApiAuthVerifierList->find(acct);
+        if (it != ApiAuthVerifierList->end())
             return it->second;
         return nullptr;
     }
@@ -695,50 +633,47 @@ public:
     }
 };
 
-class ApiAuthVerifierDataType final : public Serialize::Type
+class ApiAuthVerifierDataType final
+    : public Serialize::Type
 {
 public:
-	ApiAuthVerifierDataType(Module *owner) : Serialize::Type("ApiAuthVerifier", owner) { }
+    ApiAuthVerifierDataType(Module *owner)
+        : Serialize::Type(APIAUTH_VERIFIER_DATA_TYPE, owner)
+    {
+    }
 
-	void Serialize(Serializable *obj, Serialize::Data &data) const override
-	{
-		ApiAuthVerifierEntry *v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
-		if (v)
-		{
-			data.Store("account", v->account);
-			data.Store("scram_sha512_verifier", v->scram_sha512_verifier);
-			data.Store("scram_sha256_verifier", v->scram_sha256_verifier);
-		}
-	}
+    void Serialize(Serializable *obj, Serialize::Data &data) const override
+    {
+        const auto *v = static_cast<const ApiAuthVerifierEntry *>(obj);
+        data.Store("account", v->account);
+        data.Store("scram_sha512_verifier", v->scram_sha512_verifier);
+        data.Store("scram_sha256_verifier", v->scram_sha256_verifier);
+    }
 
-	Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
-	{
-		Anope::string account;
-		data.Load("account", account);
+    Serializable *Unserialize(Serializable *obj, Serialize::Data &data) const override
+    {
+        Anope::string account;
+        data.TryLoad("account", account);
+        if (account.empty())
+            return nullptr;
 
-		if (account.empty())
-			return nullptr;
+        ApiAuthVerifierEntry *v = nullptr;
+        if (obj)
+        {
+            v = anope_dynamic_static_cast<ApiAuthVerifierEntry *>(obj);
+        }
+        else
+        {
+            v = ApiAuthVerifierEntry::Find(account);
+            if (!v)
+                v = new ApiAuthVerifierEntry(account);
+        }
 
-		ApiAuthVerifierEntry *v = nullptr;
-		if (obj)
-		{
-			v = dynamic_cast<ApiAuthVerifierEntry *>(obj);
-			if (!v)
-				return nullptr;
-		}
-		else
-		{
-			v = ApiAuthVerifierEntry::Find(account);
-			if (!v)
-				v = new ApiAuthVerifierEntry(account);
-		}
-
-		v->account = account;
-		data.Load("scram_sha512_verifier", v->scram_sha512_verifier);
-		data.Load("scram_sha256_verifier", v->scram_sha256_verifier);
-
-		return v;
-	}
+        v->account = account;
+        data.TryLoad("scram_sha512_verifier", v->scram_sha512_verifier);
+        data.TryLoad("scram_sha256_verifier", v->scram_sha256_verifier);
+        return v;
+    }
 };
 
 class ApiAuthScramSHA512 final
@@ -1429,7 +1364,6 @@ private:
     Anope::string api_username_param;
     Anope::string api_password_param;
     Anope::string api_method;
-    Anope::string api_request_format;
     Anope::string api_success_field; // Unused in this version.
     Anope::string api_email_field;
     Anope::string api_key;             // API key if needed.
@@ -1447,12 +1381,12 @@ public:
     // Constructor.
     APIAuthRequest(User *u, IdentifyRequest *r, const Anope::string &url,
                    const Anope::string &username_param, const Anope::string &password_param,
-                                     const Anope::string &method, const Anope::string &request_format, const Anope::string &success_field,
+                   const Anope::string &method, const Anope::string &success_field,
                    const Anope::string &email_field, const Anope::string &key,
                    const Anope::string &verify_ssl, const Anope::string &capath, const Anope::string &cainfo,
                                      const Anope::string &jwt_secret_, const Anope::string &jwt_issuer_, ApiAuthScramSHA512 *scram_, ApiAuthScramSHA256 *scram256_)
         : user(u), req(r), api_url(url), api_username_param(username_param),
-                    api_password_param(password_param), api_method(method), api_request_format(request_format),
+          api_password_param(password_param), api_method(method),
           api_success_field(success_field), api_email_field(email_field),
           api_key(key), api_verify_ssl(verify_ssl), api_capath(capath), api_cainfo(cainfo),
 		  jwt_secret(jwt_secret_), jwt_issuer(jwt_issuer_), scram(scram_), scram256(scram256_)
@@ -1470,7 +1404,7 @@ public:
         APIAuthResponse response;
         response.success = false;
 
-        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
+        CURL *curl = curl_easy_init();
         if (!curl)
         {
             Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: Could not initialize CURL";
@@ -1482,136 +1416,89 @@ public:
         std::string passParam(api_password_param.c_str());
         std::string url(api_url.c_str());
 
-        // If the user authenticates with a grouped alias, authenticate against the
-        // canonical account display on the external API.
-        Anope::string api_account = req->GetAccount();
-        if (auto *na = NickAlias::Find(req->GetAccount()))
-        {
-            if (na->nc && !na->nc->display.empty())
-                api_account = na->nc->display;
-        }
-
         const auto &pw = req->GetPassword();
         Log(LOG_COMMAND) << "[api_auth]: Target URL: " << api_url;
-        Log(LOG_COMMAND) << "[api_auth]: Account='" << req->GetAccount() << "' api_account='" << api_account << "' password_present="
+        Log(LOG_COMMAND) << "[api_auth]: Account='" << req->GetAccount() << "' password_present="
                  << (!pw.empty() ? "yes" : "no") << " password_length=" << pw.length();
         Log(LOG_COMMAND) << "[api_auth]: API key configured: " << (!api_key.empty() ? "yes" : "no");
         
-        std::unique_ptr<char, decltype(&curl_free)> escaped_user(curl_easy_escape(curl.get(), api_account.c_str(), 0), &curl_free);
-        std::unique_ptr<char, decltype(&curl_free)> escaped_pass(curl_easy_escape(curl.get(), req->GetPassword().c_str(), 0), &curl_free);
-
-        const bool use_json_payload = api_request_format.equals_ci("json");
+        char *escaped_user = curl_easy_escape(curl, req->GetAccount().c_str(), 0);
+        char *escaped_pass = curl_easy_escape(curl, req->GetPassword().c_str(), 0);
 
         if (api_method.equals_ci("GET"))
         {
             std::string full_url = url;
             full_url += (full_url.find('?') == std::string::npos) ? "?" : "&";
-            full_url += userParam + "=" + (escaped_user ? escaped_user.get() : "");
-            full_url += "&" + passParam + "=" + (escaped_pass ? escaped_pass.get() : "");
-            curl_easy_setopt(curl.get(), CURLOPT_HTTPGET, 1L);
-            curl_easy_setopt(curl.get(), CURLOPT_URL, full_url.c_str());
+            full_url += userParam + "=" + (escaped_user ? escaped_user : "");
+            full_url += "&" + passParam + "=" + (escaped_pass ? escaped_pass : "");
+            curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+            curl_easy_setopt(curl, CURLOPT_URL, full_url.c_str());
         }
         else
         {
-            if (use_json_payload)
-            {
-                json payload;
-                payload[std::string(userParam)] = std::string(api_account.c_str());
-                payload[std::string(passParam)] = std::string(req->GetPassword().c_str());
-                postData = payload.dump();
-            }
-            else
-            {
-                postData = userParam + "=" + (escaped_user ? escaped_user.get() : "") + "&" +
-                           passParam + "=" + (escaped_pass ? escaped_pass.get() : "");
-            }
-
-            curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
-            curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, postData.c_str());
-            curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, static_cast<long>(postData.size()));
-            curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+            postData = userParam + "=" + (escaped_user ? escaped_user : "") + "&" +
+                       passParam + "=" + (escaped_pass ? escaped_pass : "");
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.c_str());
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         }
 
+        if (escaped_user)
+            curl_free(escaped_user);
+        if (escaped_pass)
+            curl_free(escaped_pass);
+        
         std::string key(api_key.c_str());
-        std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> headers(nullptr, &curl_slist_free_all);
-        auto append_header = [&](const std::string &header) -> bool {
-            auto *appended = curl_slist_append(headers.get(), header.c_str());
-            if (!appended)
-                return false;
-            headers.release();
-            headers.reset(appended);
-            return true;
-        };
-
-        if (!append_header("Accept: application/json"))
-        {
-            Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: Failed to allocate HTTP header list";
-            response.error_message = "Internal error: Could not prepare request headers";
-            return response;
-        }
-
-        if (!api_method.equals_ci("GET") && use_json_payload && !append_header("Content-Type: application/json"))
-        {
-            Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: Failed to allocate HTTP header list";
-            response.error_message = "Internal error: Could not prepare request headers";
-            return response;
-        }
-
-        if (!api_method.equals_ci("GET") && !use_json_payload && !append_header("Content-Type: application/x-www-form-urlencoded"))
-        {
-            Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: Failed to allocate HTTP header list";
-            response.error_message = "Internal error: Could not prepare request headers";
-            return response;
-        }
-
+        struct curl_slist *headers = NULL;
         if (!key.empty()) {
             std::string header = "X-API-Key: " + key;
-            if (!append_header(header))
-            {
-                Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: Failed to allocate HTTP header list";
-                response.error_message = "Internal error: Could not prepare request headers";
-                return response;
-            }
+            headers = curl_slist_append(headers, header.c_str());
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         }
-        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers.get());
         
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         std::string readBuffer;
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 10L);
-        curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "Anope-API-Auth/1.0");
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Anope-API-Auth/1.0");
         
         bool verify_ssl = (api_verify_ssl == "true" || api_verify_ssl == "1" || api_verify_ssl == "yes");
         if (!verify_ssl)
         {
             Log(LOG_DEBUG) << "[api_auth]: ⚠️ WARNING: SSL verification disabled";
-            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 0L);
-            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 0L);
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
         }
         else if (!api_capath.empty())
         {
-            curl_easy_setopt(curl.get(), CURLOPT_CAPATH, api_capath.c_str());
+            curl_easy_setopt(curl, CURLOPT_CAPATH, api_capath.c_str());
         }
         else if (!api_cainfo.empty())
         {
-            curl_easy_setopt(curl.get(), CURLOPT_CAINFO, api_cainfo.c_str());
+            curl_easy_setopt(curl, CURLOPT_CAINFO, api_cainfo.c_str());
         }
 
-        Log(LOG_COMMAND) << "[api_auth]: 🔄 Making API request for user @" << api_account << "@";
-        CURLcode res = curl_easy_perform(curl.get());
+        Log(LOG_COMMAND) << "[api_auth]: 🔄 Making API request for user @" << req->GetAccount() << "@";
+        CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK)
         {
             Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: CURL failed: " << curl_easy_strerror(res);
             response.error_message = "Connection error: Could not reach authentication server";
+            if (headers)
+                curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
             return response;
         }
         
         long http_code = 0;
-        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code != 200)
         {
             Log(LOG_COMMAND) << "[api_auth]: ❌ ERROR: API returned HTTP code " << http_code;
             response.error_message = "API error: Unexpected HTTP response code";
+            if (headers)
+                curl_slist_free_all(headers);
+            curl_easy_cleanup(curl);
             return response;
         }
         
@@ -1650,6 +1537,9 @@ public:
             response.error_message = "JSON exception";
         }
         
+        if (headers)
+            curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
         return response;
     }
 
@@ -1661,7 +1551,6 @@ public:
             // Decode the JWT token to determine the canonical username.
             Anope::string effective_account = req->GetAccount();
             if (!response.access_token.empty()) {
-#if APIAUTH_HAS_JWTCPP
                 try {
                     std::string token_str(response.access_token.c_str());
                     auto decoded = jwt::decode(token_str);
@@ -1687,9 +1576,6 @@ public:
                     Log(me, "api_auth") << "JWT decoding/verification failed: " << ex.what();
                     // Fall back to req->GetAccount() if verification fails.
                 }
-#else
-                Log(LOG_DEBUG) << "[api_auth]: jwt-cpp headers not available at compile time; skipping JWT decode/verification";
-#endif
             }
             
             Log(LOG_COMMAND) << "[api_auth]: Using effective account: " << effective_account;
@@ -1710,19 +1596,22 @@ public:
                 bool stored512 = false;
                 if (this->scram)
                 {
-                    // Refresh verifier on every successful API login.
-                    // Prefer API-provided encoded verifier when available.
-                    if (!response.scram_sha512_verifier.empty())
-                        stored512 = this->scram->SetVerifierFromEncoded(na->nc, response.scram_sha512_verifier);
-                    // If API verifier is missing/invalid or client-incompatible, derive from current password.
-                    if (!stored512 || this->scram->VerifierHasUnsafeSalt(na->nc))
-                        stored512 = this->scram->SetVerifierFromPassword(na->nc, req->GetPassword());
+                    const bool needs_refresh = !this->scram->HasVerifier(na->nc) || this->scram->VerifierHasUnsafeSalt(na->nc);
+                    if (needs_refresh)
+                    {
+                        // Prefer the API-provided verifier if present; otherwise derive from password.
+                        if (!response.scram_sha512_verifier.empty())
+                            stored512 = this->scram->SetVerifierFromEncoded(na->nc, response.scram_sha512_verifier);
+                        // If the API verifier is missing or client-incompatible, derive locally (generates a "safe" salt).
+                        if (!stored512 || this->scram->VerifierHasUnsafeSalt(na->nc))
+                            stored512 = this->scram->SetVerifierFromPassword(na->nc, req->GetPassword());
+                    }
                 }
                 else
                 {
                     // If another module provides the mechanism, try to use its shared verifier service.
                     ServiceReference<SASLScram::VerifierService> svc("SASLScram::VerifierService", "SCRAM-SHA-512");
-                    if (svc)
+                    if (svc && !svc->HasVerifier(na->nc))
                     {
                         svc->SetVerifierFromPassword(na->nc, req->GetPassword());
                         stored512 = svc->HasVerifier(na->nc);
@@ -1735,16 +1624,19 @@ public:
                 bool stored256 = false;
                 if (this->scram256)
                 {
-                    // Refresh verifier on every successful API login.
-                    if (!response.scram_sha256_verifier.empty())
-                        stored256 = this->scram256->SetVerifierFromEncoded(na->nc, response.scram_sha256_verifier);
-                    if (!stored256 || this->scram256->VerifierHasUnsafeSalt(na->nc))
-                        stored256 = this->scram256->SetVerifierFromPassword(na->nc, req->GetPassword());
+                    const bool needs_refresh = !this->scram256->HasVerifier(na->nc) || this->scram256->VerifierHasUnsafeSalt(na->nc);
+                    if (needs_refresh)
+                    {
+                        if (!response.scram_sha256_verifier.empty())
+                            stored256 = this->scram256->SetVerifierFromEncoded(na->nc, response.scram_sha256_verifier);
+                        if (!stored256 || this->scram256->VerifierHasUnsafeSalt(na->nc))
+                            stored256 = this->scram256->SetVerifierFromPassword(na->nc, req->GetPassword());
+                    }
                 }
                 else
                 {
                     ServiceReference<SASLScram::VerifierService> svc("SASLScram::VerifierService", "SCRAM-SHA-256");
-                    if (svc)
+                    if (svc && !svc->HasVerifier(na->nc))
                     {
                         svc->SetVerifierFromPassword(na->nc, req->GetPassword());
                         stored256 = svc->HasVerifier(na->nc);
@@ -1753,10 +1645,6 @@ public:
 
                 if (stored256)
                     Log(LOG_COMMAND) << "[api_auth]: Stored SCRAM-SHA-256 verifier for " << na->nc->display;
-
-                if (!stored512 && !stored256)
-                    Log(LOG_NORMAL) << "[api_auth]: WARNING: successful API login for " << na->nc->display
-                                    << " but no SCRAM verifier was persisted (check SCRAM mechanism/service configuration)";
             }
 
             if (!response.email.empty() && response.email != na->nc->email) {
@@ -1764,11 +1652,6 @@ public:
                 if (user && NickServ)
                     user->SendMessage(NickServ, _("E-mail set to \002%s\002."), response.email.c_str());
             }
-
-            // Force immediate disk persistence for login-time updates.
-            // QueueUpdate() marks objects dirty but backend save may be deferred.
-            Anope::SaveDatabases();
-
             // Optionally, store the JWT token (response.access_token) for further usage.
             req->Success(me, na);
         } else {
@@ -1786,7 +1669,6 @@ class ModuleAPIAuth final : public Module {
     Anope::string api_username_param;
     Anope::string api_password_param;
     Anope::string api_method;
-    Anope::string api_request_format;
     // api_success_field is not used in this version.
     Anope::string api_email_field;
     Anope::string disable_reason;
@@ -1799,106 +1681,11 @@ class ModuleAPIAuth final : public Module {
     Anope::string jwt_issuer;
     Anope::string profile_url;
     Anope::string register_url;
-    Anope::string webhook_url;
-    Anope::string webhook_secret;
 
     bool enable_sasl_scram_sha512 = false;
     bool enable_sasl_scram_sha256 = true;
     unsigned scram_iterations = 4096;
     size_t scram_saltlen = 16;
-
-    // Send a GROUP or UNGROUP webhook to the Django backend.
-    // Fires synchronously (blocking up to 5 s), acceptable since this happens
-    // only on explicit user NickServ GROUP/UNGROUP commands, not per-message.
-    void SendGroupWebhook(const Anope::string &event_type, const Anope::string &account, const Anope::string &nick)
-    {
-        if (this->webhook_url.empty())
-            return;
-
-        const auto event_id = GenerateUUID();
-        const auto ts = static_cast<long long>(Anope::CurTime);
-
-        json payload;
-        payload["event_id"]   = std::string(event_id.c_str());
-        payload["event_type"] = std::string(event_type.c_str());
-        payload["account"]    = std::string(account.c_str());
-        payload["nick"]       = std::string(nick.c_str());
-        payload["ts"]         = ts;
-        const std::string body = payload.dump();
-
-        // HMAC-SHA256 signature: header value is "sha256=<lowercase hex>"
-        std::string sig_header;
-        if (!this->webhook_secret.empty())
-        {
-            const auto hmac = HmacSha256(this->webhook_secret, Anope::string(body.c_str(), body.size()));
-            if (!hmac.empty())
-                sig_header = "X-Anope-Signature: sha256=" + std::string(Anope::Hex(hmac).c_str());
-        }
-
-        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
-        if (!curl)
-        {
-            Log(LOG_NORMAL) << "[api_auth]: webhook: curl_easy_init failed";
-            return;
-        }
-
-        std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> headers(nullptr, &curl_slist_free_all);
-        auto append_hdr = [&](const std::string &h) -> bool {
-            auto *n = curl_slist_append(headers.get(), h.c_str());
-            if (!n) return false;
-            headers.release();
-            headers.reset(n);
-            return true;
-        };
-
-        if (!append_hdr("Content-Type: application/json") || !append_hdr("Accept: application/json"))
-        {
-            Log(LOG_NORMAL) << "[api_auth]: webhook: failed to build header list";
-            return;
-        }
-        if (!sig_header.empty() && !append_hdr(sig_header))
-        {
-            Log(LOG_NORMAL) << "[api_auth]: webhook: failed to append signature header";
-            return;
-        }
-
-        const std::string url(this->webhook_url.c_str());
-        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl.get(), CURLOPT_POST, 1L);
-        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, body.c_str());
-        curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
-        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, headers.get());
-        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 5L);
-        curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "Anope-API-Auth/1.0");
-
-        // Reuse the same SSL settings as the main auth request.
-        const bool verify_ssl = (this->api_verify_ssl == "true" || this->api_verify_ssl == "1" || this->api_verify_ssl == "yes");
-        if (!verify_ssl)
-        {
-            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 0L);
-            curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 0L);
-        }
-
-        std::string resp_buf;
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &resp_buf);
-
-        const CURLcode res = curl_easy_perform(curl.get());
-        if (res != CURLE_OK)
-        {
-            Log(LOG_NORMAL) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account
-                            << " failed: " << curl_easy_strerror(res);
-            return;
-        }
-
-        long http_code = 0;
-        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
-        if (http_code == 200)
-            Log(LOG_COMMAND) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account << " ok";
-        else
-            Log(LOG_NORMAL) << "[api_auth]: webhook: " << event_type << " " << nick << "->" << account
-                            << " HTTP " << http_code << " body=" << resp_buf;
-    }
 
     void BroadcastSaslMechsIfSynced()
     {
@@ -1975,112 +1762,6 @@ class ModuleAPIAuth final : public Module {
     std::unique_ptr<Scram256VerifierServiceImpl> scram256_service;
 
     ApiAuthVerifierDataType verifier_type;
-
-    size_t ImportVerifiersFromJson(const json &root)
-    {
-        const auto dit = root.find("data");
-        if (dit == root.end() || !dit->is_object())
-            return 0;
-
-        const auto vit = dit->find(APIAUTH_VERIFIER_DATA_TYPE);
-        if (vit == dit->end() || !vit->is_array())
-            return 0;
-
-        size_t imported = 0;
-        for (const auto &item : *vit)
-        {
-            if (!item.is_object())
-                continue;
-
-            const auto account_it = item.find("account");
-            if (account_it == item.end() || !account_it->is_string())
-                continue;
-
-            const Anope::string account = account_it->get<std::string>();
-            if (account.empty())
-                continue;
-
-            auto *entry = ApiAuthVerifierEntry::FindOrCreate(account);
-
-            const auto sha512_it = item.find("scram_sha512_verifier");
-            if (sha512_it != item.end() && sha512_it->is_string())
-                entry->scram_sha512_verifier = sha512_it->get<std::string>();
-
-            const auto sha256_it = item.find("scram_sha256_verifier");
-            if (sha256_it != item.end() && sha256_it->is_string())
-                entry->scram_sha256_verifier = sha256_it->get<std::string>();
-
-            ++imported;
-        }
-
-        return imported;
-    }
-
-    size_t LoadVerifiersFromFile(const std::string &path)
-    {
-        std::ifstream in(path);
-        if (!in.is_open())
-            return 0;
-
-        try
-        {
-            json root;
-            in >> root;
-            return ImportVerifiersFromJson(root);
-        }
-        catch (...)
-        {
-            return 0;
-        }
-    }
-
-    void RecoverVerifierCacheIfEmpty()
-    {
-        if (!ApiAuthVerifierList.empty())
-            return;
-
-        size_t imported = LoadVerifiersFromFile("data/m_apiauth.module.json");
-        if (imported > 0)
-        {
-            Log(LOG_NORMAL) << "[api_auth]: Recovered " << imported
-                            << " verifier record(s) from data/m_apiauth.module.json";
-            return;
-        }
-
-        std::vector<std::filesystem::path> backups;
-        const std::filesystem::path backup_dir("data/backups");
-
-        try
-        {
-            if (std::filesystem::exists(backup_dir) && std::filesystem::is_directory(backup_dir))
-            {
-                for (const auto &entry : std::filesystem::directory_iterator(backup_dir))
-                {
-                    if (!entry.is_regular_file())
-                        continue;
-
-                    const auto name = entry.path().filename().string();
-                    if (name.rfind("m_apiauth.module.json.", 0) == 0)
-                        backups.push_back(entry.path());
-                }
-            }
-        }
-        catch (...)
-        {
-        }
-
-        std::sort(backups.begin(), backups.end(), std::greater<std::filesystem::path>());
-        for (const auto &backup : backups)
-        {
-            imported = LoadVerifiersFromFile(backup.string());
-            if (imported > 0)
-            {
-                Log(LOG_NORMAL) << "[api_auth]: Recovered " << imported
-                                << " verifier record(s) from backup " << backup.string();
-                return;
-            }
-        }
-    }
 public:
     ModuleAPIAuth(const Anope::string &modname, const Anope::string &creator)
         : Module(modname, creator, EXTRA | VENDOR)
@@ -2098,7 +1779,6 @@ public:
         this->api_username_param = config.Get<const Anope::string>("api_username_param", "username");
         this->api_password_param = config.Get<const Anope::string>("api_password_param", "password");
         this->api_method = config.Get<const Anope::string>("api_method", "POST");
-        this->api_request_format = config.Get<const Anope::string>("api_request_format", "json");
         this->api_email_field = config.Get<const Anope::string>("api_email_field", "email");
         this->disable_reason = config.Get<const Anope::string>("disable_reason");
         this->disable_email_reason = config.Get<const Anope::string>("disable_email_reason");
@@ -2110,8 +1790,6 @@ public:
         this->jwt_issuer = config.Get<const Anope::string>("jwt_issuer", "");
         this->profile_url = config.Get<const Anope::string>("profile_url", "https://www.example/accounts/profile/%s/"); // dynamic fetch
         this->register_url = config.Get<const Anope::string>("register_url", "https://www.example/accounts/register/");
-        this->webhook_url = config.Get<const Anope::string>("webhook_url", "");
-        this->webhook_secret = config.Get<const Anope::string>("webhook_secret", "");
 
         this->enable_sasl_scram_sha512 = config.Get<bool>("enable_sasl_scram_sha512", "no");
         this->enable_sasl_scram_sha256 = config.Get<bool>("enable_sasl_scram_sha256", "yes");
@@ -2182,11 +1860,6 @@ public:
             this->scram256_mech.reset();
             BroadcastSaslMechsIfSynced();
         }
-
-        RecoverVerifierCacheIfEmpty();
-
-        Log(LOG_COMMAND) << "[api_auth]: Loaded " << ApiAuthVerifierList.size()
-                         << " persisted SCRAM verifier record(s) from database";
     }
 
     void OnPreUplinkSync(Server *) override
@@ -2196,38 +1869,27 @@ public:
             BroadcastSaslMechsIfSynced();
     }
     EventReturn OnPreCommand(CommandSource &source, Command *command, std::vector<Anope::string> &params) override {
-        if (!this->disable_reason.empty() && command->name == "nickserv/register") {
-            Anope::string formatted_reason = NormalizeReplyLine(this->disable_reason);
-            Anope::string formatted_register_url = NormalizeReplyLine(this->register_url);
+        if (!this->disable_reason.empty() && (command->name == "nickserv/register" || command->name == "nickserv/group")) {
+            Anope::string formatted_reason = this->disable_reason;
             if (formatted_reason.find("%s") != Anope::string::npos)
-                formatted_reason = formatted_reason.replace_all_cs("%s", formatted_register_url);
-            else if (!formatted_register_url.empty())
-                formatted_reason += (formatted_reason.empty() ? "" : " ") + formatted_register_url;
-
-            formatted_reason = NormalizeReplyLine(formatted_reason);
-            if (formatted_reason.empty())
-                formatted_reason = "Registration is disabled.";
-
+                formatted_reason = formatted_reason.replace_all_cs("%s", this->register_url);
+            else if (!this->register_url.empty())
+                formatted_reason += " " + this->register_url;
             source.Reply(formatted_reason);
             return EVENT_STOP;
         }
         if (!this->disable_email_reason.empty() && command->name == "nickserv/set/email") {
             Anope::string account = source.GetAccount() ? source.GetAccount()->display : "";
-            Anope::string formatted_url = NormalizeReplyLine(this->profile_url);
+            Anope::string formatted_url = this->profile_url;
             if (account.empty())
                 account = "";
             if (formatted_url.find("%s") != Anope::string::npos)
                 formatted_url = formatted_url.replace_all_cs("%s", account);
-            Anope::string formatted_reason = NormalizeReplyLine(this->disable_email_reason);
+            Anope::string formatted_reason = this->disable_email_reason;
             if (formatted_reason.find("%s") != Anope::string::npos)
                 formatted_reason = formatted_reason.replace_all_cs("%s", formatted_url);
             else
-                formatted_reason += (formatted_url.empty() ? "" : (formatted_reason.empty() ? "" : " ") + formatted_url);
-
-            formatted_reason = NormalizeReplyLine(formatted_reason);
-            if (formatted_reason.empty())
-                formatted_reason = "Changing email here is disabled.";
-
+                formatted_reason += " " + formatted_url;
             source.Reply(formatted_reason);
             return EVENT_STOP;
         }
@@ -2239,7 +1901,6 @@ public:
                                                       this->api_username_param,
                                                       this->api_password_param,
                                                       this->api_method,
-                                                      this->api_request_format,
                                                       "", // success field not used
                                                       this->api_email_field,
                                                       this->api_key,
@@ -2254,34 +1915,6 @@ public:
     void OnPreNickExpire(NickAlias *na, bool &expire) override {
         if (na->nick == na->nc->display && na->nc->aliases->size() > 1)
             expire = false;
-    }
-
-    // Fired by Anope when a user does /ns GROUP.
-    // u->nick is the nick being added as alias; target->nc->display is the account.
-    void OnNickGroup(User *u, NickAlias *target) override
-    {
-        if (!u || !target || !target->nc)
-            return;
-        // Skip if this is the same as the primary display (new account registration path).
-        if (u->nick.equals_ci(target->nc->display))
-            return;
-        Log(LOG_COMMAND) << "[api_auth]: webhook GROUP " << u->nick << " -> " << target->nc->display;
-        SendGroupWebhook("GROUP", target->nc->display, u->nick);
-    }
-
-    // Fired by Anope when a nick alias is destroyed (covers NS DROP of an alias).
-    // Note: NS UNGROUP does NOT destroy the alias (it reassigns it to a new NickCore),
-    // so this hook does not fire for UNGROUP. It fires for NS DROP of a grouped alias.
-    void OnDelNick(NickAlias *na) override
-    {
-        if (!na || !na->nc)
-            return;
-        // Skip when the deleted nick IS the account display — that is either a full
-        // account drop or a display change, not a grouped alias being removed.
-        if (na->nick.equals_ci(na->nc->display))
-            return;
-        Log(LOG_COMMAND) << "[api_auth]: webhook UNGROUP " << na->nick << " -> " << na->nc->display;
-        SendGroupWebhook("UNGROUP", na->nc->display, na->nick);
     }
 };
 

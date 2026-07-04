@@ -61,6 +61,7 @@ struct NotifyEntry : Serializable
 		data.Store("created", this->created);
 		data.Store("expires", this->expires);
 	}
+
 	static Serializable* Unserialize(Serializable *obj, Serialize::Data &data);
 };
 
@@ -237,24 +238,7 @@ class NotifyList
 	/* Check if a User is matched to any Notify Entries already */
 	bool IsMatch(const User *u)
 	{
-		if (match_user.count(u) > 0)
-			return true;
-
-		/* Fallback to direct checks in case cached map state is stale. */
-		for (unsigned i = notifies->size(); i > 0; --i)
-		{
-			const NotifyEntry *ne = notifies->at(i - 1);
-			if (!ne)
-				continue;
-
-			if (ne->expires && ne->expires <= Anope::CurTime)
-				continue;
-
-			if (this->Check(u, ne->mask))
-				return true;
-		}
-
-		return false;
+		return (match_user.count(u) > 0);
 	}
 
 	/* Check if a User is matched to a Notify Entry with a specific flag */
@@ -264,23 +248,6 @@ class NotifyList
 		for (PerUserMap::const_iterator it = itpair.first; it != itpair.second; ++it)
 		{
 			if (it->second->flags.count(flag) > 0)
-				return true;
-		}
-
-		/* Fallback to direct checks in case cached map state is stale. */
-		for (unsigned i = notifies->size(); i > 0; --i)
-		{
-			const NotifyEntry *ne = notifies->at(i - 1);
-			if (!ne)
-				continue;
-
-			if (ne->expires && ne->expires <= Anope::CurTime)
-				continue;
-
-			if (ne->flags.count(flag) == 0)
-				continue;
-
-			if (this->Check(u, ne->mask))
 				return true;
 		}
 
@@ -311,24 +278,20 @@ Serializable* NotifyEntry::Unserialize(Serializable *obj, Serialize::Data &data)
 	if (obj)
 		ne = anope_dynamic_static_cast<NotifyEntry *>(obj);
 	else
-		ne = new NotifyEntry;
+		ne = new NotifyEntry();
 
-	data.Load("mask", ne->mask);
-	data.Load("reason", ne->reason);
-	
 	Anope::string flags;
-	data.Load("flags", flags);
-	for (unsigned i = 0; i < flags.length(); ++i)
-		ne->flags.insert(flags[i]);
+	data.TryLoad("mask", ne->mask);
+	data.TryLoad("reason", ne->reason);
+	data.TryLoad("flags", flags);
+	data.TryLoad("creator", ne->creator);
+	data.TryLoad("created", ne->created);
+	data.TryLoad("expires", ne->expires);
+	for (unsigned f = 0; f != flags.length(); ++f)
+		ne->flags.insert(flags[f]);
 
-	data.Load("creator", ne->creator);
-	data.Load("created", ne->created);
-	data.Load("expires", ne->expires);
-
-	/* 
-	 * We removed the NotifyList line entirely. 
-	 * The object registers itself upon creation. 
-	 */
+	if (!obj)
+		NotifyList.AddNotify(ne);
 
 	return ne;
 }
@@ -1270,9 +1233,6 @@ class OSNotify : public Module
 			return;
 		}
 
-		/* Ensure user-mask matches are refreshed for users not already cached. */
-		CheckUserOrChannel(u);
-
 		bool oldmatch = false;
 
 		if (NotifyList.IsMatch(u))
@@ -1298,8 +1258,6 @@ class OSNotify : public Module
 	{
 		if (IsExcluded(u))
 			return;
-
-		CheckUserOrChannel(u);
 		if (NotifyList.HasFlag(u, 'p'))
 			NLog("channel", "%s parted %s (reason: %s)", BuildNUHR(u).c_str(), c->name.c_str(), msg.c_str());
 	}
@@ -1339,14 +1297,12 @@ class OSNotify : public Module
 
 	void OnUserModeSet(const MessageSource &setter, User *u, const Anope::string &mname) override
 	{
-		CheckUserOrChannel(u);
 		if (NotifyList.HasFlag(u, 'u'))
 			OnUserMode(setter, u, mname, true);
 	}
 
 	void OnUserModeUnset(const MessageSource &setter, User *u, const Anope::string &mname) override
 	{
-		CheckUserOrChannel(u);
 		if (NotifyList.HasFlag(u, 'u'))
 			OnUserMode(setter, u, mname, false);
 	}
@@ -1358,8 +1314,6 @@ class OSNotify : public Module
 			return;
 		if (IsExcluded(u))
 			return;
-
-		CheckUserOrChannel(const_cast<User *>(u));
 
 		if (NotifyList.HasFlag(u, 'm'))
 		{
@@ -1406,8 +1360,6 @@ class OSNotify : public Module
 		const User *u = source ? source : User::Find(user, false);
 		if (u && IsExcluded(u))
 			return;
-		if (u)
-			CheckUserOrChannel(const_cast<User *>(u));
 
 		if (u && NotifyList.HasFlag(u, 't'))
 			NLog("channel", "TOPIC -- %s set to %s by %s", c->name.c_str(), topic.c_str(), BuildNUHR(u).c_str());
@@ -1420,8 +1372,6 @@ class OSNotify : public Module
 			return;
 		if (IsExcluded(u))
 			return;
-
-		CheckUserOrChannel(const_cast<User *>(u));
 
 		const Anope::string &cmd = command->name;
 		if ((!NotifyList.HasFlag(u, 's') && !Anope::Match(cmd, "*/set/*")) ||
