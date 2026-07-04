@@ -30,6 +30,7 @@ jobs:
             libssl-dev \
             libtre-dev \
             ninja-build \
+            build-essential \
             nlohmann-json3-dev
 
       - name: Enable extras
