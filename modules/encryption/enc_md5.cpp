@@ -12,10 +12,17 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/// BEGIN CMAKE
+/// target_link_libraries(${SO} PRIVATE "vendored_md5")
+/// END CMAKE
+
 #include "module.h"
 #include "modules/encryption.h"
 
-#include "md5/md5.c"
+extern "C"
+{
+#include "md5/md5.h"
+}
 
 class MD5Context final
 	: public Encryption::Context

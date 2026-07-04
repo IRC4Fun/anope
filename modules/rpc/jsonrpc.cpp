@@ -12,11 +12,17 @@
 //
 // SPDX-License-Identifier: GPL-2.0-only
 
+/// BEGIN CMAKE
+/// target_link_libraries(${SO} PRIVATE "vendored_yyjson")
+/// END CMAKE
+
+#include <cmath>
+
 #include "module.h"
 #include "modules/rpc.h"
 #include "modules/httpd.h"
 
-#include "yyjson/yyjson.c"
+#include "yyjson/yyjson.h"
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
@@ -313,10 +319,9 @@ public:
 			throw ConfigException("Unable to find http reference, is httpd loaded?");
 
 		jsonrpcinterface.tokens.clear();
-		for (int i = 0; i < modconf.CountBlock("token"); ++i)
-		{
-			const auto &block = modconf.GetBlock("token", i);
 
+		for (const auto &[_,  block] : modconf.GetBlocks("token"))
+		{
 			RPC::Token token;
 			token.token = block.Get<const Anope::string>("token");
 			if (!token.token.empty())

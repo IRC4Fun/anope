@@ -92,6 +92,13 @@ public:
 	{
 		return new AccessChanAccess(this);
 	}
+
+	void GetAccess(CommandSource& source, const Privilege *p, Anope::map<Anope::string> &access) override
+	{
+		auto it = defaultLevels.find(p->name);
+		if (it != defaultLevels.end())
+			access[_("Level")] = LevelToString(source, it->second);
+	}
 };
 AccessAccessProvider *AccessAccessProvider::me;
 
@@ -956,10 +963,8 @@ public:
 	{
 		defaultLevels.clear();
 
-		for (int i = 0; i < conf.CountBlock("privilege"); ++i)
+		for (const auto &[_,  priv] : conf.GetBlocks("privilege"))
 		{
-			const auto &priv = conf.GetBlock("privilege", i);
-
 			const Anope::string &pname = priv.Get<const Anope::string>("name");
 
 			Privilege *p = PrivilegeManager::FindPrivilege(pname);

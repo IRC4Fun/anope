@@ -66,7 +66,7 @@ public:
 		}
 
 		time_t nickregdelay = Config->GetModule(this->owner).Get<time_t>("nickregdelay");
-		time_t reg_delay = Config->GetModule("nickserv").Get<time_t>("regdelay");
+		time_t reg_delay = Config->GetModule("nickserv").Get<time_t>("regdelay", "15m");
 		if (u && !u->HasMode("OPER") && nickregdelay && Anope::CurTime - u->timestamp < nickregdelay)
 		{
 			auto waitperiod = (u->timestamp + nickregdelay) -  Anope::CurTime;
@@ -275,18 +275,28 @@ public:
 			return;
 		}
 
-		auto *passcode = nc->GetExt<Anope::string>("passcode");
-		if (!passcode)
+		if (!nc->HasExt("UNCONFIRMED"))
 		{
 			source.Reply(_("There is no registration confirmation pending for %s."),
 				na->nick.c_str());
 			return;
 		}
-		if (!code.empty() && !code.equals_cs(*passcode))
+
+		if (!code.empty())
 		{
-			source.Reply(_("The registration confirmation code you specified for %s is incorrect."),
-				na->nick.c_str());
-			return;
+			auto *passcode = nc->GetExt<Anope::string>("passcode");
+			if (passcode && !code.equals_cs(*passcode))
+			{
+				source.Reply(_("The registration confirmation code you specified for %s is incorrect."),
+					na->nick.c_str());
+				return;
+			}
+			else if (!passcode)
+			{
+				source.Reply(_("The registration of %s can only be confirmed by an administrator."),
+					na->nick.c_str());
+				return;
+			}
 		}
 
 		nc->Shrink<Anope::string>("passcode");

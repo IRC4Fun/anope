@@ -50,7 +50,7 @@ macro(inline_cmake TARGET FILE)
         set(CODE "${CODE}\n${CLEAN_LINE}")
       endif()
     elseif(LINE MATCHES "^/// BEGIN CMAKE$")
-        message(STATUS "Executing inline CMake code for ${TARGET}")
+        message(DEBUG "Executing inline CMake code for ${TARGET}")
         set(IN_CODE ON)
     endif()
   endforeach()
@@ -77,6 +77,12 @@ macro(build_module SRC MODULE_SRC)
       PREFIX ""
       SUFFIX ""
     )
+    list(LENGTH MODULE_SRC MODULE_SRC_COUNT)
+    if(MODULE_SRC_COUNT LESS_EQUAL 1)
+      set_target_properties(${SO} PROPERTIES
+        UNITY_BUILD OFF
+      )
+    endif()
     add_dependencies(${SO} ${PROGRAM_NAME})
     if(HAVE_LOCALIZATION)
       add_dependencies(${SO} module_language)

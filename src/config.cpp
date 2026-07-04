@@ -38,28 +38,37 @@ const Anope::string &Configuration::Block::GetName() const
 	return name;
 }
 
-int Configuration::Block::CountBlock(const Anope::string &bname) const
+size_t Configuration::Block::CountBlock(const Anope::string &bname) const
 {
 	return blocks.count(bname);
 }
 
-const Configuration::Block &Configuration::Block::GetBlock(const Anope::string &bname, int num) const
+Configuration::Block::BlockList Configuration::Block::GetBlocks(const Anope::string &bname) const
 {
-	std::pair<block_map::const_iterator, block_map::const_iterator> it = blocks.equal_range(bname);
+	return Anope::equal_range(blocks, bname);
+}
 
-	for (int i = 0; it.first != it.second; ++it.first, ++i)
+const Configuration::Block &Configuration::Block::GetBlock(const Anope::string &bname, size_t num) const
+{
+	auto it = blocks.equal_range(bname);
+
+	for (size_t i = 0; it.first != it.second; ++it.first, ++i)
+	{
 		if (i == num)
 			return it.first->second;
+	}
 	return EmptyBlock;
 }
 
-Configuration::Block *Configuration::Block::GetMutableBlock(const Anope::string &bname, int num)
+Configuration::Block *Configuration::Block::GetMutableBlock(const Anope::string &bname, size_t num)
 {
-	std::pair<block_map::iterator, block_map::iterator> it = blocks.equal_range(bname);
+	auto it = blocks.equal_range(bname);
 
-	for (int i = 0; it.first != it.second; ++it.first, ++i)
+	for (size_t i = 0; it.first != it.second; ++it.first, ++i)
+	{
 		if (i == num)
 			return &it.first->second;
+	}
 	return NULL;
 }
 
@@ -69,7 +78,7 @@ bool Configuration::Block::Set(const Anope::string &tag, const Anope::string &va
 	return true;
 }
 
-const Configuration::Block::item_map &Configuration::Block::GetItems() const
+const Configuration::Block::ItemMap &Configuration::Block::GetItems() const
 {
 	return items;
 }
@@ -125,10 +134,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 
 	this->LoadConf(ServicesConf);
 
-	for (int i = 0; i < this->CountBlock("include"); ++i)
+	for (const auto &[_,  include] : this->GetBlocks("include"))
 	{
-		const auto &include = this->GetBlock("include", i);
-
 		const Anope::string &type = include.Get<const Anope::string>("type"),
 					&file = include.Get<const Anope::string>("name");
 
@@ -205,10 +212,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 	this->TimeoutCheck = options.Get<time_t>("timeoutcheck");
 	this->NickChars = networkinfo.Get<Anope::string>("nick_chars");
 
-	for (int i = 0; i < this->CountBlock("uplink"); ++i)
+	for (const auto &[_,  uplink] : this->GetBlocks("uplink"))
 	{
-		const auto &uplink = this->GetBlock("uplink", i);
-
 		int protocol;
 		const Anope::string &protocolstr = uplink.Get<const Anope::string>("protocol", "ipv4");
 		if (protocolstr == "ipv4")
@@ -238,10 +243,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		this->Uplinks.emplace_back(host, port, password, protocol);
 	}
 
-	for (int i = 0; i < this->CountBlock("module"); ++i)
+	for (const auto &[_,  module] : this->GetBlocks("module"))
 	{
-		const auto &module = this->GetBlock("module", i);
-
 		const Anope::string &modname = module.Get<const Anope::string>("name");
 
 		ValidateNotEmptyOrSpaces("module", "name", modname);
@@ -249,10 +252,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		this->ModulesAutoLoad.push_back(modname);
 	}
 
-	for (int i = 0; i < this->CountBlock("opertype"); ++i)
+	for (const auto &[_,  opertype] : this->GetBlocks("opertype"))
 	{
-		const auto &opertype = this->GetBlock("opertype", i);
-
 		const Anope::string &oname = opertype.Get<const Anope::string>("name"),
 				&modes = opertype.Get<const Anope::string>("modes"),
 				&inherits = opertype.Get<const Anope::string>("inherits"),
@@ -292,10 +293,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		this->MyOperTypes.push_back(ot);
 	}
 
-	for (int i = 0; i < this->CountBlock("oper"); ++i)
+	for (const auto &[_,  oper] : this->GetBlocks("oper"))
 	{
-		const auto &oper = this->GetBlock("oper", i);
-
 		const Anope::string &nname = oper.Get<const Anope::string>("name"),
 					&type = oper.Get<const Anope::string>("type"),
 					&password = oper.Get<const Anope::string>("password"),
@@ -330,10 +329,9 @@ Configuration::Conf::Conf() : Configuration::Block("")
 
 	for (const auto &[_, bi] : *BotListByNick)
 		bi->conf = false;
-	for (int i = 0; i < this->CountBlock("service"); ++i)
-	{
-		const auto &service = this->GetBlock("service", i);
 
+	for (const auto &[_,  service] : this->GetBlocks("service"))
+	{
 		const Anope::string &nick = service.Get<const Anope::string>("nick"),
 					&user = service.Get<const Anope::string>("user", nick.lower()),
 					&host = service.Get<const Anope::string>("host", servername),
@@ -421,10 +419,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		}
 	}
 
-	for (int i = 0; i < this->CountBlock("log"); ++i)
+	for (const auto &[_,  log] : this->GetBlocks("log"))
 	{
-		const auto &log = this->GetBlock("log", i);
-
 		int logage = log.Get<int>("logage");
 		bool rawio = log.Get<bool>("rawio");
 		bool debug = log.Get<bool>("debug");
@@ -447,10 +443,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 
 	for (const auto &[_, bi] : *BotListByNick)
 		bi->commands.clear();
-	for (int i = 0; i < this->CountBlock("command"); ++i)
+	for (const auto &[_,  command] : this->GetBlocks("command"))
 	{
-		const auto &command = this->GetBlock("command", i);
-
 		const Anope::string &service = command.Get<const Anope::string>("service"),
 					&nname = command.Get<const Anope::string>("name"),
 					&cmd = command.Get<const Anope::string>("command"),
@@ -472,10 +466,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 	}
 
 	PrivilegeManager::ClearPrivileges();
-	for (int i = 0; i < this->CountBlock("privilege"); ++i)
+	for (const auto &[_,  privilege] : this->GetBlocks("privilege"))
 	{
-		const auto &privilege = this->GetBlock("privilege", i);
-
 		const Anope::string &nname = privilege.Get<const Anope::string>("name"),
 					&desc = privilege.Get<const Anope::string>("desc");
 		int rank = privilege.Get<int>("rank");
@@ -483,10 +475,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		PrivilegeManager::AddPrivilege(Privilege(nname, desc, rank));
 	}
 
-	for (int i = 0; i < this->CountBlock("fantasy"); ++i)
+	for (const auto &[_,  fantasy] : this->GetBlocks("fantasy"))
 	{
-		const auto &fantasy = this->GetBlock("fantasy", i);
-
 		const Anope::string &nname = fantasy.Get<const Anope::string>("name"),
 					&service = fantasy.Get<const Anope::string>("command"),
 					&permission = fantasy.Get<const Anope::string>("permission"),
@@ -504,10 +494,8 @@ Configuration::Conf::Conf() : Configuration::Block("")
 		c.require_privilege = fantasy.Get<bool>("require_privilege", "yes");
 	}
 
-	for (int i = 0; i < this->CountBlock("command_group"); ++i)
+	for (const auto &[_,  command_group] : this->GetBlocks("command_group"))
 	{
-		const auto &command_group = this->GetBlock("command_group", i);
-
 		const Anope::string &nname = command_group.Get<const Anope::string>("name"),
 					&description = command_group.Get<const Anope::string>("description");
 
@@ -655,7 +643,7 @@ Configuration::Block &Configuration::Conf::GetModule(const Anope::string &mname)
 	auto *&block = modules[mname];
 
 	/* Search for the block */
-	for (std::pair<block_map::iterator, block_map::iterator> iters = blocks.equal_range("module"); iters.first != iters.second; ++iters.first)
+	for (auto iters = blocks.equal_range("module"); iters.first != iters.second; ++iters.first)
 	{
 		auto &b = iters.first->second;
 
@@ -688,7 +676,7 @@ const Configuration::Block &Configuration::Conf::GetCommand(CommandSource &sourc
 {
 	const Anope::string &block_name = source.c ? "fantasy" : "command";
 
-	for (std::pair<block_map::iterator, block_map::iterator> iters = blocks.equal_range(block_name); iters.first != iters.second; ++iters.first)
+	for (auto iters = blocks.equal_range(block_name); iters.first != iters.second; ++iters.first)
 	{
 		auto &b = iters.first->second;
 
@@ -782,7 +770,7 @@ void Configuration::Conf::LoadConf(Configuration::File &file)
 
 	Anope::string itemname, wordbuffer;
 	std::stack<Configuration::Block *> block_stack;
-	int linenumber = 0;
+	unsigned linenumber = 0;
 	bool in_word = false, in_quote = false, in_comment = false;
 
 	Log(LOG_DEBUG) << "Start to read conf " << file.GetPath();
@@ -984,7 +972,7 @@ void Configuration::Conf::LoadConf(Configuration::File &file)
 	}
 }
 
-Anope::string Configuration::Conf::ReplaceVars(const Anope::string &str, const Configuration::File &file, int linenumber)
+Anope::string Configuration::Conf::ReplaceVars(const Anope::string &str, const Configuration::File &file, unsigned linenumber)
 {
 	Anope::string ret;
 	for (auto it = str.begin(); it != str.end(); )
@@ -1020,9 +1008,8 @@ Anope::string Configuration::Conf::ReplaceVars(const Anope::string &str, const C
 		}
 
 		auto found = false;
-		for (int i = 0; i < this->CountBlock("define"); ++i)
+		for (const auto &[_,  define] : this->GetBlocks("define"))
 		{
-			const auto &define = this->GetBlock("define", i);
 			const auto defname = define.Get<const Anope::string>("name");
 			if (defname == var)
 			{
