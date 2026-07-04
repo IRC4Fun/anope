@@ -23,7 +23,6 @@ under the terms of the GNU General Public License.
 
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
-#include <jwt-cpp/jwt.h>  // Added for JWT token decoding and verification
 
 #include <memory>
 #include <algorithm>
