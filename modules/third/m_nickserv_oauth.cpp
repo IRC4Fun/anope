@@ -11,8 +11,7 @@
 
 /// BEGIN CMAKE
 /// find_package(OpenSSL REQUIRED)
-/// find_package(jwt-cpp REQUIRED)
-/// target_link_libraries(${SO} PUBLIC OpenSSL::Crypto OpenSSL::SSL jwt-cpp::jwt-cpp)
+/// target_link_libraries(${SO} PUBLIC OpenSSL::Crypto OpenSSL::SSL)
 /// END CMAKE
 
 #include "module.h"
