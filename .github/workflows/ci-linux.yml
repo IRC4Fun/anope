@@ -2,12 +2,12 @@ name: Ubuntu CI
 on:
   pull_request:
     paths-ignore:
-      - 'modules/third/m_apiauth.cpp'
-      - 'modules/third/m_nickserv_oauth.cpp'
+      - '*/m_apiauth*'
+      - '*/m_nickserv_oauth*'
   push:
     paths-ignore:
-      - 'modules/third/m_apiauth.cpp'
-      - 'modules/third/m_nickserv_oauth.cpp'
+      - '*/m_apiauth*'
+      - '*/m_nickserv_oauth*'
   schedule:
     - cron: 0 0 * * 0
   workflow_dispatch:
