@@ -3,9 +3,11 @@ on:
   pull_request:
     paths-ignore:
       - 'modules/third/m_apiauth.cpp'
+      - 'modules/third/m_nickserv_oauth.cpp'
   push:
     paths-ignore:
       - 'modules/third/m_apiauth.cpp'
+      - 'modules/third/m_nickserv_oauth.cpp'
   schedule:
     - cron: 0 0 * * 0
   workflow_dispatch:
