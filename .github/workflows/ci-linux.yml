@@ -1,7 +1,11 @@
 name: Ubuntu CI
 on:
   pull_request:
+    paths-ignore:
+      - 'modules/third/m_apiauth.cpp'
   push:
+    paths-ignore:
+      - 'modules/third/m_apiauth.cpp'
   schedule:
     - cron: 0 0 * * 0
   workflow_dispatch:
