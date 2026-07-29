@@ -462,8 +462,8 @@ public:
 				MemoServ::service->Send(source.service->nick, nick, source.Translate(message.c_str()), true);
 			}
 
-			source.Reply(_("VHost for %s has been rejected."), nick.c_str());
-			Log(LOG_COMMAND, source, this) << "to reject vhost for " << nick << " (" << (!reason.empty() ? reason : "no reason") << ")";
+			source.Reply(_("VHost for %s has been rejected."), na->nick.c_str());
+			Log(LOG_COMMAND, source, this) << "to reject vhost for " << na->nick << " (" << (!reason.empty() ? reason : "no reason") << ")";
 		}
 		else
 			source.Reply(_("No request for nick %s found."), nick.c_str());
@@ -487,7 +487,7 @@ class CommandHSWaiting final
 public:
 	CommandHSWaiting(Module *creator) : Command(creator, "hostserv/waiting", 0, 0)
 	{
-		this->SetDesc(_("Retrieves the vhost requests"));
+		this->SetDesc(_("Retrieve the vhost requests"));
 	}
 
 	void Execute(CommandSource &source, const std::vector<Anope::string> &params) override
@@ -547,7 +547,7 @@ public:
 		: Command(creator, "hostserv/validate", 0)
 		, data(sd)
 	{
-		this->SetDesc(_("Validates a previously requested vhost using DNS"));
+		this->SetDesc(_("Validate a previously requested vhost using DNS"));
 	}
 
 	void Execute(CommandSource &source, const std::vector<Anope::string> &params) override

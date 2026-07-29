@@ -56,8 +56,9 @@ protected:
 				buffer.clear();
 			}
 
-			buffer.append(buffer.empty() ? "  " : ", ");
-			buffer.append(timezone);
+			buffer
+				.append(buffer.empty() ? "  " : ", ")
+				.append(timezone);
 		}
 
 		if (!buffer.empty())
@@ -156,7 +157,10 @@ public:
 			));
 
 			for (const auto &[timeregion, timezone] : timeregions)
-				source.Reply("    %s (%zu timezones)", timeregion.c_str(), timezone.size());
+			{
+				source.Reply(timezone.size(), N_("    %s (%zu timezone)", "    %s (%zu timezones)"),
+					timeregion.c_str(), timezone.size());
+			}
 
 			source.Reply(_("Type \002%s\033\037region\037\002 to list timezones for a region."),
 				source.service->GetQueryCommand("generic/help", source.command).c_str());
@@ -240,12 +244,32 @@ public:
 		// Build the region list.
 		for (const auto &timezone : timezones)
 		{
-			auto tzsep = timezone.find('/');
+			const auto tzsep = timezone.rfind('/');
 			auto region = tzsep == Anope::string::npos ? "Misc" : timezone.substr(0, tzsep);
 			timeregions[region].push_back(timezone);
 		}
-		for (auto &[_, timeregion] : timeregions)
-			std::sort(timeregion.begin(), timeregion.end());
+
+		// Eliminate regions with only one timezone.
+		for (auto it = timeregions.end(); it != timeregions.begin(); )
+		{
+			it--;
+			const auto &[timeregion, timezones] = *it;
+			if (!timeregion.equals_ci("Misc") && timezones.size() < 2)
+			{
+				const auto trsep = timeregion.rfind('/');
+				auto region = trsep == Anope::string::npos ? "Misc" : timeregion.substr(0, trsep);
+
+				auto& parentregion = timeregions[region];
+				parentregion.insert(parentregion.end(), timezones.begin(), timezones.end());
+
+				it = timeregions.erase(it);
+				continue;
+			}
+		}
+
+		// Ensure the timezone list is ordered alphabetically.
+		for (auto &[_, timezones] : timeregions)
+			std::sort(timezones.begin(), timezones.end());
 #endif
 	}
 };

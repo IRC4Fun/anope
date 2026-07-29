@@ -95,7 +95,7 @@ public:
 			return;
 		}
 
-		const size_t expiry_idx = params.size() >= 1 && params[1][0] == '+' ? 1 : 0;
+		const size_t expiry_idx = params.size() > 1 && params[1][0] == '+' ? 1 : 0;
 		const size_t reason_idx = expiry_idx ? 2 : 1;
 
 		time_t expiry_secs = Config->GetModule(this->owner).Get<time_t>("suspendexpire");
@@ -165,7 +165,7 @@ class CommandCSUnSuspend final
 public:
 	CommandCSUnSuspend(Module *creator) : Command(creator, "chanserv/unsuspend", 1, 1)
 	{
-		this->SetDesc(_("Releases a suspended channel"));
+		this->SetDesc(_("Release a suspended channel"));
 		this->SetSyntax(_("\037channel\037"));
 	}
 
